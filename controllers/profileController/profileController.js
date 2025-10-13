@@ -51,7 +51,7 @@ const handleGetProfile = async (req, res) => {
 const handleUpdateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { fullName, email  } = req.body;
+    const { fullName, email,role  } = req.body;
 
     const user = await User.findByPk(userId);
     if (!user) {
@@ -61,6 +61,7 @@ const handleUpdateProfile = async (req, res) => {
 
     if (fullName) user.fullName = fullName;
     if (email) user.email = email;
+    if (role) user.role = role;
 
     if (req.fileUrl) {
       user.profilePhoto = req.fileUrl;
