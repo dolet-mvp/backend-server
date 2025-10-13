@@ -53,6 +53,8 @@ const handleUpdateProfile = async (req, res) => {
     const userId = req.user.id;
     const { fullName, email,role  } = req.body;
 
+    //testing
+
     const user = await User.findByPk(userId);
     if (!user) {
       console.error("User not found:", userId);
