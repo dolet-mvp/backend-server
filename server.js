@@ -35,19 +35,85 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 const checkForAuthenticationCookie = require("./middleware/authMiddleware");
-const { authorizeRoles } = require("./middleware/roleMiddleware");
+
 const authRoutes = require("./routes/authRoute/authRoute");
 const profileRoutes = require("./routes/profileRoute/profileRoute");
 const addressRoutes = require("./routes/addressRoute/addressRoute");
+const taskRoutes = require("./routes/taskRoute/taskRoute");
+const bidRoutes = require("./routes/bidRoute/bidRoute");
+const trackingRoutes = require("./routes/trackingRoute/trackingRoute");
+const paymentRoutes = require("./routes/paymentRoute/paymentRoute");
+const ratingRoutes = require("./routes/ratingRoute/ratingRoute");
+const helperRoutes = require("./routes/helperRoute/helperRoute");
+const notificationRoutes = require("./routes/notificationRoute/notificationRoute");
+const supportRoutes = require("./routes/supportRoute/supportRoute");
 
+
+// Public routes
 app.use("/api/auth", authRoutes);
+
 
 app.use(
   "/api/user",
   checkForAuthenticationCookie("token"),
-  authorizeRoles(["helpseeker", "helper", "admin"]),
   profileRoutes, addressRoutes
 );
+
+app.use(
+  "/api/tasks",
+  checkForAuthenticationCookie("token"),
+  taskRoutes
+);
+
+// Bid management routes
+app.use(
+  "/api/bids",
+  checkForAuthenticationCookie("token"),
+  bidRoutes
+);
+
+// Task tracking routes
+app.use(
+  "/api/tracking",
+  checkForAuthenticationCookie("token"),
+  trackingRoutes
+);
+
+// Payment routes
+app.use(
+  "/api/payments",
+  checkForAuthenticationCookie("token"),
+  paymentRoutes
+);
+
+// Rating routes
+app.use(
+  "/api/ratings",
+  checkForAuthenticationCookie("token"),
+  ratingRoutes
+);
+
+// Helper profile routes
+app.use(
+  "/api/helpers",
+  checkForAuthenticationCookie("token"),
+  helperRoutes
+);
+
+// Notification routes
+app.use(
+  "/api/notifications",
+  checkForAuthenticationCookie("token"),
+  notificationRoutes
+);
+
+// Support ticket routes
+app.use(
+  "/api/support",
+  checkForAuthenticationCookie("token"),
+  supportRoutes
+);
+
 
 app.get("/api/health", (req, res) => {
   res.status(200).json({

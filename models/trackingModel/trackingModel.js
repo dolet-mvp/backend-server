@@ -33,7 +33,7 @@ const TaskTracking = sequelize.define(
       type: DataTypes.ENUM(
         "on_the_way",
         "arrived",
-        "work_started", 
+        "work_started",
         "work_paused",
         "work_resumed",
         "work_completed"

@@ -30,7 +30,7 @@ const Task = sequelize.define(
       allowNull: false,
     },
     skillsRequired: {
-      type: DataTypes.JSON, // Array of skills
+      type: DataTypes.JSON, 
       allowNull: true,
     },
     budget: {
@@ -38,7 +38,7 @@ const Task = sequelize.define(
       allowNull: false,
     },
     estimatedDuration: {
-      type: DataTypes.INTEGER, // in hours
+      type: DataTypes.INTEGER,
       allowNull: true,
     },
     dueDate: {
@@ -86,6 +86,14 @@ const Task = sequelize.define(
       },
       allowNull: true,
     },
+    pendingHelperId: {
+      type: DataTypes.UUID,
+      references: {
+        model: "users",
+        key: "id",
+      },
+      allowNull: true,
+    },
     acceptedAt: {
       type: DataTypes.DATE,
       allowNull: true,
@@ -101,6 +109,26 @@ const Task = sequelize.define(
     isUrgent: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
+    },
+    verificationOtp: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    otpGeneratedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    otpVerifiedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    isOtpVerified: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    allowDirectAcceptance: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true, // Allow helpers to accept directly without bidding
     }
   },
   {

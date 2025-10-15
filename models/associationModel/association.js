@@ -9,6 +9,8 @@ const Notification = require("../notificationModel/notificationModel");
 const TaskTracking = require("../trackingModel/trackingModel");
 const Message = require("../messageModel/messageModel");
 const HelperProfile = require("../helperModel/helperModel");
+const SupportTicket = require("../supportModel/supportTicketModel");
+const TicketReply = require("../supportModel/ticketReplyModel");
 
 // User - Address Associations
 User.hasMany(Address, {
@@ -44,6 +46,18 @@ User.hasMany(Task, {
 Task.belongsTo(User, { 
   foreignKey: "assignedHelperId", 
   as: "assignedHelper" 
+});
+
+// User - Task Associations (as Pending Helper)
+User.hasMany(Task, {
+  foreignKey: "pendingHelperId",
+  as: "pendingTasks",
+  onDelete: "SET NULL",
+});
+
+Task.belongsTo(User, { 
+  foreignKey: "pendingHelperId", 
+  as: "pendingHelper" 
 });
 
 // Task - Bid Associations
@@ -258,6 +272,54 @@ User.hasOne(HelperProfile, {
 });
 
 HelperProfile.belongsTo(User, { 
+  foreignKey: "userId", 
+  as: "user" 
+});
+
+// User - SupportTicket Associations (as Ticket Creator)
+User.hasMany(SupportTicket, {
+  foreignKey: "userId",
+  as: "supportTickets",
+  onDelete: "CASCADE",
+});
+
+SupportTicket.belongsTo(User, { 
+  foreignKey: "userId", 
+  as: "user" 
+});
+
+// User - SupportTicket Associations (as Assigned Admin)
+User.hasMany(SupportTicket, {
+  foreignKey: "assignedAdminId",
+  as: "assignedTickets",
+  onDelete: "SET NULL",
+});
+
+SupportTicket.belongsTo(User, { 
+  foreignKey: "assignedAdminId", 
+  as: "assignedAdmin" 
+});
+
+// SupportTicket - TicketReply Associations
+SupportTicket.hasMany(TicketReply, {
+  foreignKey: "ticketId",
+  as: "replies",
+  onDelete: "CASCADE",
+});
+
+TicketReply.belongsTo(SupportTicket, { 
+  foreignKey: "ticketId", 
+  as: "ticket" 
+});
+
+// User - TicketReply Associations
+User.hasMany(TicketReply, {
+  foreignKey: "userId",
+  as: "ticketReplies",
+  onDelete: "CASCADE",
+});
+
+TicketReply.belongsTo(User, { 
   foreignKey: "userId", 
   as: "user" 
 });
