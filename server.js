@@ -47,6 +47,7 @@ const ratingRoutes = require("./routes/ratingRoute/ratingRoute");
 const helperRoutes = require("./routes/helperRoute/helperRoute");
 const notificationRoutes = require("./routes/notificationRoute/notificationRoute");
 const supportRoutes = require("./routes/supportRoute/supportRoute");
+const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
 
 
 // Public routes
@@ -112,6 +113,13 @@ app.use(
   "/api/support",
   checkForAuthenticationCookie("token"),
   supportRoutes
+);
+
+// Task message routes
+app.use(
+  "/api/messages",
+  checkForAuthenticationCookie("token"),
+  taskMessageRoutes
 );
 
 

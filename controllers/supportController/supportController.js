@@ -135,8 +135,11 @@ const getTicketDetails = async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.role;
 
+    // Check if ticketId is UUID (database id) or generated ticketId (TKT-XXXXX)
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticketId);
+    
     const ticket = await SupportTicket.findOne({
-      where: { ticketId },
+      where: isUUID ? { id: ticketId } : { ticketId },
       include: [
         {
           model: User,

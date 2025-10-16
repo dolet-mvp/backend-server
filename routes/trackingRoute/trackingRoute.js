@@ -6,6 +6,7 @@ const {
   markArrived,
   startWork,
   completeWork,
+  verifyCompletionOtp,
   getTaskTracking,
   updateLocation,
 } = require("../../controllers/trackingController/trackingController");
@@ -19,6 +20,7 @@ router.post(
   supabaseUpload.array("photos", 10),
   completeWork
 );
+router.post("/task/:taskId/verify-completion", verifyCompletionOtp);
 router.patch("/task/:taskId/location", updateLocation);
 
 // Common routes (both helper and helpseeker)

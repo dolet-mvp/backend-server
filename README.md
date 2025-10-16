@@ -192,7 +192,8 @@ backend-server/
 | POST | `/api/tracking/task/:taskId/on-the-way` | Update status: on the way | Yes | Helper |
 | POST | `/api/tracking/task/:taskId/arrived` | Mark as arrived | Yes | Helper |
 | POST | `/api/tracking/task/:taskId/start-work` | Start work | Yes | Helper |
-| POST | `/api/tracking/task/:taskId/complete-work` | Complete work (with photos) | Yes | Helper |
+| POST | `/api/tracking/task/:taskId/complete-work` | Mark work complete & generate OTP | Yes | Helper |
+| POST | `/api/tracking/task/:taskId/verify-completion` | Verify OTP & finalize completion | Yes | Helper |
 | PATCH | `/api/tracking/task/:taskId/location` | Update current location | Yes | Helper |
 | GET | `/api/tracking/task/:taskId` | Get tracking info | Yes | All |
 
@@ -293,6 +294,12 @@ backend-server/
 - Status updates: On the way → Arrived → Work started → Completed
 - Photo uploads on completion (Supabase Storage)
 - Tracking history
+- **OTP-based task completion verification** (New!)
+  - Helper marks work as complete → OTP sent to helpseeker
+  - Helpseeker verifies work → Shares OTP with helper
+  - Helper submits OTP → Task finalized as completed
+  - 30-minute OTP validity
+  - Secure two-step completion process
 
 #### Payment Integration (Razorpay)
 - Helper requests payment after completion

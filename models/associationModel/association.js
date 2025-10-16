@@ -11,6 +11,7 @@ const Message = require("../messageModel/messageModel");
 const HelperProfile = require("../helperModel/helperModel");
 const SupportTicket = require("../supportModel/supportTicketModel");
 const TicketReply = require("../supportModel/ticketReplyModel");
+const TaskMessage = require("../messageModel/taskMessageModel");
 
 // User - Address Associations
 User.hasMany(Address, {
@@ -323,3 +324,28 @@ TicketReply.belongsTo(User, {
   foreignKey: "userId", 
   as: "user" 
 });
+
+// Task - TaskMessage Associations
+Task.hasMany(TaskMessage, {
+  foreignKey: "taskId",
+  as: "taskMessages",
+  onDelete: "CASCADE",
+});
+
+TaskMessage.belongsTo(Task, { 
+  foreignKey: "taskId", 
+  as: "task" 
+});
+
+// User - TaskMessage Associations
+User.hasMany(TaskMessage, {
+  foreignKey: "senderId",
+  as: "sentTaskMessages",
+  onDelete: "CASCADE",
+});
+
+TaskMessage.belongsTo(User, { 
+  foreignKey: "senderId", 
+  as: "sender" 
+});
+

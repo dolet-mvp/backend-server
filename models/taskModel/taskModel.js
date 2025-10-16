@@ -17,6 +17,8 @@ const Task = sequelize.define(
       },
       allowNull: false,
     },
+
+    //
     title: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -25,6 +27,8 @@ const Task = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: false,
     },
+
+    //
     category: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -70,6 +74,8 @@ const Task = sequelize.define(
       type: DataTypes.JSON, // {address, lat, lng, city, state}
       allowNull: true,
     },
+
+    //
     attachments: {
       type: DataTypes.JSON, // Array of file URLs
       allowNull: true,
@@ -126,10 +132,39 @@ const Task = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: false,
     },
+    // Completion OTP fields
+    completionOtp: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: "OTP for task completion verification"
+    },
+    completionOtpGeneratedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When completion OTP was generated"
+    },
+    completionOtpVerifiedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When completion OTP was verified"
+    },
+    isCompletionOtpVerified: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      comment: "Whether completion OTP has been verified"
+    },
     allowDirectAcceptance: {
       type: DataTypes.BOOLEAN,
-      defaultValue: true, // Allow helpers to accept directly without bidding
+      defaultValue: true, 
+    },
+    steps: {
+      type: DataTypes.JSON, 
+      allowNull: true,
+      defaultValue: [],
+      comment: "Task steps/milestones - can be dynamically added by user"
     }
+
+   // task
   },
   {
     tableName: "tasks",

@@ -24,7 +24,8 @@ const createTask = async (req, res) => {
       locationRequired,
       location,
       requirements,
-      allowDirectAcceptance
+      allowDirectAcceptance,
+      steps
     } = req.body;
 
     // Parse location if it comes as string from form-data
@@ -45,6 +46,37 @@ const createTask = async (req, res) => {
         skillsRequired = JSON.parse(skillsRequired);
       } catch (error) {
         skillsRequired = [];
+      }
+    }
+
+    // Parse steps if it comes as string from form-data
+    if (steps && typeof steps === 'string') {
+      try {
+        steps = JSON.parse(steps);
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid steps format. Must be a valid JSON array",
+        });
+      }
+    }
+
+    // Validate steps structure if provided
+    if (steps && Array.isArray(steps)) {
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        if (!step.title || typeof step.title !== 'string') {
+          return res.status(400).json({
+            success: false,
+            message: `Step ${i + 1} must have a title`,
+          });
+        }
+        // Set default values for step
+        step.order = step.order || i + 1;
+        step.isCompleted = step.isCompleted || false;
+        step.completedAt = step.completedAt || null;
+        step.description = step.description || "";
+        step.notes = step.notes || "";
       }
     }
 
@@ -171,7 +203,8 @@ const createTask = async (req, res) => {
       location: locationRequired ? location : null,
       attachments,
       requirements,
-      allowDirectAcceptance: allowDirectAcceptance || true
+      allowDirectAcceptance: allowDirectAcceptance || true,
+      steps: steps || []
     });
 
     res.status(201).json({
@@ -332,6 +365,45 @@ const updateTask = async (req, res) => {
         updateData.skillsRequired = JSON.parse(updateData.skillsRequired);
       } catch (error) {
         updateData.skillsRequired = [];
+      }
+    }
+
+    // Parse steps if it comes as string from form-data
+    if (updateData.steps && typeof updateData.steps === 'string') {
+      try {
+        updateData.steps = JSON.parse(updateData.steps);
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid steps format. Must be a valid JSON array",
+        });
+      }
+    }
+
+    // Validate steps structure if provided
+    if (updateData.steps && Array.isArray(updateData.steps)) {
+      for (let i = 0; i < updateData.steps.length; i++) {
+        const step = updateData.steps[i];
+        if (!step.title || typeof step.title !== 'string') {
+          return res.status(400).json({
+            success: false,
+            message: `Step ${i + 1} must have a title`,
+          });
+        }
+        // Ensure default values for step
+        step.order = step.order || i + 1;
+        step.isCompleted = step.isCompleted !== undefined ? step.isCompleted : false;
+        step.description = step.description || "";
+        step.notes = step.notes || "";
+        
+        // If marking as completed and no completedAt timestamp, add it
+        if (step.isCompleted && !step.completedAt) {
+          step.completedAt = new Date().toISOString();
+        }
+        // If marking as not completed, remove completedAt
+        if (!step.isCompleted) {
+          step.completedAt = null;
+        }
       }
     }
 
