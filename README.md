@@ -11,14 +11,18 @@ A comprehensive Node.js/Express backend server for the Dolet application - a mod
 - [Authentication & Authorization](#authentication--authorization)
 - [Environment Variables](#environment-variables)
 - [Getting Started](#getting-started)
+- [AI-Powered Task Generation](#ai-powered-task-generation)
+- [Task Messaging System](#task-messaging-system)
 - [Visual Flow Diagrams](#visual-flow-diagrams)
+- [Recent Updates](#recent-updates)
 
 ## Project Overview
 
 Dolet is a full-featured marketplace platform that enables:
-- **Helpseekers**: Post tasks, manage budgets, approve helpers via OTP, track progress, and make payments
-- **Helpers**: Browse tasks, place bids, accept tasks with OTP verification, track work progress, request payments
-- **Real-time Features**: Location tracking, notifications, ratings, and payment processing
+- **Helpseekers**: Post tasks with AI assistance, manage budgets, approve helpers via OTP, track progress, message helpers, and make payments
+- **Helpers**: Browse tasks, place bids, accept tasks with OTP verification, track work progress, communicate with helpseekers, request payments
+- **AI Features**: Natural language task generation with Google Gemini, smart field extraction, auto-categorization
+- **Real-time Features**: Location tracking, in-app messaging, notifications, ratings, and payment processing
 
 ## Technology Stack
 
@@ -29,9 +33,11 @@ Dolet is a full-featured marketplace platform that enables:
 - **Authentication**: JSON Web Tokens (JWT) with httpOnly cookies
 - **File Storage**: Supabase Storage
 - **Payment Gateway**: Razorpay v2.9.6
+- **AI Integration**: Google Gemini API (Gemini Pro)
 - **Email Service**: Nodemailer v7.0.9
 - **Password Security**: bcryptjs v3.0.2
 - **File Upload**: Multer v2.0.2
+- **HTTP Client**: Axios (for AI API calls)
 - **Additional**: cookie-parser, cors, dotenv
 
 ## Project Structure
@@ -237,6 +243,19 @@ backend-server/
 | PATCH | `/api/support/admin/ticket/:ticketId/update` | Update ticket status/priority/assign | Yes | Admin |
 | GET | `/api/support/admin/statistics` | Get ticket statistics | Yes | Admin |
 
+### AI Routes (`/api/ai`) - Gemini Integration
+| Method | Endpoint | Description | Auth Required | Role |
+|--------|----------|-------------|---------------|------|
+| POST | `/api/ai/generate-task-json` | Generate task JSON from user description | No | All |
+
+### Message Routes (`/api/messages`)
+| Method | Endpoint | Description | Auth Required | Role |
+|--------|----------|-------------|---------------|------|
+| GET | `/api/messages/my-tasks` | Get all tasks with message counts | Yes | All |
+| POST | `/api/messages/task/:taskId` | Send message (with attachments) | Yes | Task Participants |
+| GET | `/api/messages/task/:taskId` | Get all messages for task (paginated) | Yes | Task Participants |
+| DELETE | `/api/messages/message/:messageId` | Delete your own message | Yes | Sender |
+
 ### Helper Routes (`/api/helper`)
 | Method | Endpoint | Description | Auth Required | Role |
 |--------|----------|-------------|---------------|------|
@@ -374,6 +393,29 @@ backend-server/
 - Popular job categories in area
 - Budget insights and active job counts
 
+#### AI-Powered Task Generation (Gemini API)
+- User provides task description in natural language
+- AI analyzes and structures data into task fields
+- Extracts: title, category, budget, duration, priority, steps
+- Returns JSON for frontend editing
+- Combines user description with prewritten guidelines
+- Smart field mapping to Task model
+- Gemini Pro integration
+
+#### Task Messaging System
+- Direct messaging between helpseeker and helper
+- One conversation per task
+- Message features:
+  - Text messages with timestamps
+  - File attachments (up to 5 per message)
+  - Message deletion (sender only)
+  - Pagination support (50 messages/page)
+- Access control: Only task participants can message
+- Cannot send messages on completed tasks (read-only)
+- Notifications for new messages
+- Message count tracking per task
+- List all tasks with message previews
+
 ### Technical Features
 - UUID primary keys for security
 - File uploads to Supabase Storage
@@ -430,6 +472,9 @@ SUPABASE_BUCKET_NAME=dolet-files
 RAZORPAY_KEY_ID=your_razorpay_key_id
 RAZORPAY_KEY_SECRET=your_razorpay_key_secret
 
+# Google Gemini AI Configuration
+GEMINI_API_KEY=your_google_gemini_api_key
+
 # Email Configuration (Nodemailer)
 EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
@@ -442,8 +487,9 @@ EMAIL_PASSWORD=your_app_password
 ### Prerequisites
 - Node.js (v14 or higher)
 - PostgreSQL (v12 or higher)
-- Supabase account
+- Supabase account (for file storage)
 - Razorpay account (for payments)
+- Google AI Studio account (for Gemini API key)
 
 ### Installation
 
@@ -463,6 +509,11 @@ npm install
 cp .env.example .env
 # Edit .env with your configuration
 ```
+
+**Get your Gemini API Key:**
+- Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
+- Create a new API key
+- Add to `.env` as `GEMINI_API_KEY=your_key_here`
 
 4. **Set up PostgreSQL database**
 ```bash
@@ -501,6 +552,206 @@ curl -X POST http://localhost:8181/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"user@example.com","password":"password123","fullName":"John Doe","role":"helpseeker"}'
 ```
+
+## AI-Powered Task Generation
+
+### Overview
+The platform integrates Google's Gemini AI to help users create structured task listings from natural language descriptions. Users simply describe what they need in plain text, and the AI extracts relevant information to populate task fields.
+
+### How It Works
+
+1. **User Input**: User provides a task description in natural language
+2. **AI Processing**: Backend sends description + prewritten guidelines to Gemini API
+3. **Structured Output**: AI returns JSON with extracted task fields
+4. **User Editing**: Frontend displays the AI-generated task for user review/editing
+
+### API Endpoint
+
+**POST** `/api/ai/generate-task-json`
+
+**Request Body:**
+```json
+{
+  "description": "I need someone to stand in a bank line at SBI Besu branch on my behalf. When my number comes, call me. Budget: 1000 rupees. Urgent task, takes about 1 hour."
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "title": "Stand in Bank Line at SBI Besu Branch",
+    "description": "Need someone to wait in bank queue...",
+    "category": "Errands & Tasks",
+    "budget": 1000,
+    "estimatedDuration": 60,
+    "priority": "urgent",
+    "location": {
+      "address": "SBI Besu Branch, Shibpur"
+    },
+    "steps": [
+      {
+        "title": "Wait in bank line",
+        "description": "Stand in queue at SBI Besu branch",
+        "order": 1
+      },
+      {
+        "title": "Call when number comes",
+        "description": "Contact helpseeker when turn arrives",
+        "order": 2
+      }
+    ],
+    "skillsRequired": null,
+    "requirements": null
+  }
+}
+```
+
+### Fields Extracted
+- **title**: Short task title
+- **description**: Detailed description
+- **category**: Task category
+- **budget**: Estimated budget
+- **estimatedDuration**: Time in minutes
+- **priority**: low, medium, high, urgent
+- **location**: Address and coordinates
+- **steps**: Array of task milestones
+- **skillsRequired**: Required skills (if mentioned)
+
+### Benefits
+- ✅ Faster task creation
+- ✅ Structured data from unstructured input
+- ✅ Consistent task quality
+- ✅ Better task categorization
+- ✅ Auto-generated steps/milestones
+
+## Task Messaging System
+
+### Overview
+Direct messaging between helpseeker and helper for each assigned task. Messages are preserved even after task completion for reference.
+
+### Features
+
+#### Message Types
+- **Text Messages**: Standard text communication
+- **File Attachments**: Upload up to 5 files per message (images, documents)
+- **Timestamps**: All messages timestamped
+- **Read Status**: Track message delivery
+
+#### Access Control
+- Only task creator (helpseeker) and assigned helper can message
+- No messages allowed on unassigned tasks
+- Cannot send new messages after task completion (read-only)
+- Each user can only see their own task conversations
+
+#### Message Management
+- **Send**: Text with optional attachments
+- **View**: Paginated message history (50 per page)
+- **Delete**: Senders can delete their own messages
+- **Count**: Track unread/total message counts
+
+### API Endpoints
+
+#### 1. Get All Tasks with Messages
+**GET** `/api/messages/my-tasks`
+
+Returns all tasks where you're involved, with message counts.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "task-uuid",
+      "title": "Help with moving",
+      "status": "in_progress",
+      "creator": { "id": "...", "firstName": "John" },
+      "assignedHelper": { "id": "...", "firstName": "Jane" },
+      "messageCount": 15,
+      "lastMessage": {
+        "message": "When should I arrive?",
+        "createdAt": "2025-10-22T10:30:00Z"
+      }
+    }
+  ]
+}
+```
+
+#### 2. Send Message
+**POST** `/api/messages/task/:taskId`
+
+**Request (multipart/form-data):**
+```
+message: "I'll arrive at 3 PM"
+attachments: [file1.jpg, file2.pdf]
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Message sent successfully",
+  "data": {
+    "id": "message-uuid",
+    "message": "I'll arrive at 3 PM",
+    "attachments": ["url1", "url2"],
+    "sender": { "firstName": "John", "lastName": "Doe" },
+    "createdAt": "2025-10-22T14:30:00Z"
+  }
+}
+```
+
+#### 3. Get Task Messages
+**GET** `/api/messages/task/:taskId?page=1&limit=50`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "messages": [...],
+    "pagination": {
+      "total": 15,
+      "page": 1,
+      "limit": 50,
+      "totalPages": 1
+    },
+    "task": {
+      "id": "task-uuid",
+      "title": "Help with moving",
+      "status": "in_progress"
+    }
+  }
+}
+```
+
+#### 4. Delete Message
+**DELETE** `/api/messages/message/:messageId`
+
+Only the sender can delete their own messages.
+
+### Use Cases
+
+**During Task:**
+- Coordinate meeting times
+- Share location updates
+- Send photos of work progress
+- Clarify requirements
+- Update status
+
+**After Completion:**
+- Reference conversation history
+- Dispute resolution
+- Review work agreements
+- Future reference
+
+### Notifications
+Users receive in-app notifications for:
+- New messages received
+- Message replies
+- Task assignment (messaging enabled)
 
 ## Visual Flow Diagrams
 
@@ -997,4 +1248,36 @@ For support, email support@dolet.com or open an issue in the repository.
 
 ---
 
-**Built with Node.js, Express, PostgreSQL, and Razorpay**
+## Recent Updates
+
+### ✨ New Features
+
+**AI-Powered Task Generation (Gemini API)**
+- Natural language to structured task data
+- Auto-extraction of title, category, budget, steps
+- Smart field mapping with user editing
+- `/api/ai/generate-task-json` endpoint
+
+**Task Messaging System**
+- Direct messaging between task participants
+- File attachments (up to 5 per message)
+- Message history with pagination
+- Preserved after task completion
+- `/api/messages/*` endpoints
+
+**Task Completion OTP Verification**
+- Two-step completion verification
+- Helper marks complete → OTP to helpseeker
+- Helpseeker shares OTP → Task finalized
+- 30-minute OTP validity
+- Prevents premature task completion
+
+### 📚 Documentation
+- Complete API documentation for AI features
+- Task messaging guide with examples
+- OTP completion flow diagrams
+- Updated environment variables
+
+---
+
+**Built with Node.js, Express, PostgreSQL, Razorpay, and Google Gemini AI**

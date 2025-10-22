@@ -48,11 +48,12 @@ const helperRoutes = require("./routes/helperRoute/helperRoute");
 const notificationRoutes = require("./routes/notificationRoute/notificationRoute");
 const supportRoutes = require("./routes/supportRoute/supportRoute");
 const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
+const geminiRoutes = require("./routes/aiRoute/gemniRoute");
 
 
-// Public routes
 app.use("/api/auth", authRoutes);
 
+app.use("/api/ai", geminiRoutes);
 
 app.use(
   "/api/user",
