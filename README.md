@@ -12,6 +12,7 @@ A comprehensive Node.js/Express backend server for the Dolet application - a mod
 - [Environment Variables](#environment-variables)
 - [Getting Started](#getting-started)
 - [AI-Powered Task Generation](#ai-powered-task-generation)
+- [Scheduled Task Publishing](#scheduled-task-publishing)
 - [Task Messaging System](#task-messaging-system)
 - [Visual Flow Diagrams](#visual-flow-diagrams)
 - [Recent Updates](#recent-updates)
@@ -19,9 +20,10 @@ A comprehensive Node.js/Express backend server for the Dolet application - a mod
 ## Project Overview
 
 Dolet is a full-featured marketplace platform that enables:
-- **Helpseekers**: Post tasks with AI assistance, manage budgets, approve helpers via OTP, track progress, message helpers, and make payments
+- **Helpseekers**: Post tasks with AI assistance, schedule future publishing, manage budgets, approve helpers via OTP, track progress, message helpers, and make payments
 - **Helpers**: Browse tasks, place bids, accept tasks with OTP verification, track work progress, communicate with helpseekers, request payments
 - **AI Features**: Natural language task generation with Google Gemini, smart field extraction, auto-categorization
+- **Automation**: Scheduled task publishing with cron jobs, auto-publish at specified times
 - **Real-time Features**: Location tracking, in-app messaging, notifications, ratings, and payment processing
 
 ## Technology Stack
@@ -34,6 +36,7 @@ Dolet is a full-featured marketplace platform that enables:
 - **File Storage**: Supabase Storage
 - **Payment Gateway**: Razorpay v2.9.6
 - **AI Integration**: Google Gemini API (Gemini Pro)
+- **Task Scheduler**: node-cron v3.0.3 (for scheduled task publishing)
 - **Email Service**: Nodemailer v7.0.9
 - **Password Security**: bcryptjs v3.0.2
 - **File Upload**: Multer v2.0.2
@@ -135,6 +138,8 @@ backend-server/
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
 | POST | `/api/auth/register` | User registration | No |
+| POST | `/api/auth/login` | User login | No |
+| POST | `/api/auth/logout` | User logout | Yes |
 
 ### Profile Management (`/api/user`)
 | Method | Endpoint | Description | Auth Required | Role |
@@ -159,6 +164,8 @@ backend-server/
 | POST | `/api/tasks/create` | Create draft task (with attachments) | Yes | Helpseeker |
 | PUT | `/api/tasks/:taskId` | Update draft task | Yes | Helpseeker |
 | POST | `/api/tasks/:taskId/publish` | Publish task to queue | Yes | Helpseeker |
+| POST | `/api/tasks/:taskId/schedule-publish` | Schedule task for future publishing | Yes | Helpseeker |
+| DELETE | `/api/tasks/:taskId/cancel-schedule` | Cancel scheduled publish | Yes | Helpseeker |
 | GET | `/api/tasks/my-tasks` | Get all my tasks | Yes | Helpseeker |
 | DELETE | `/api/tasks/:taskId/cancel` | Cancel task | Yes | Helpseeker |
 | PATCH | `/api/tasks/:taskId/increase-reward` | Increase budget | Yes | Helpseeker |
@@ -203,14 +210,14 @@ backend-server/
 | PATCH | `/api/tracking/task/:taskId/location` | Update current location | Yes | Helper |
 | GET | `/api/tracking/task/:taskId` | Get tracking info | Yes | All |
 
-### Payment Routes (`/api/payment`) - Razorpay Integration
+### Payment Routes (`/api/payments`) - Razorpay Integration
 | Method | Endpoint | Description | Auth Required | Role |
 |--------|----------|-------------|---------------|------|
-| POST | `/api/payment/task/:taskId/request` | Request payment (create Razorpay order) | Yes | Helper |
-| POST | `/api/payment/verify` | Verify payment signature | Yes | Helpseeker |
-| GET | `/api/payment/task/:taskId/request` | View payment request | Yes | Helpseeker |
-| GET | `/api/payment/history` | Get payment history | Yes | All |
-| POST | `/api/payment/:paymentId/refund` | Request refund | Yes | All |
+| POST | `/api/payments/task/:taskId/request` | Request payment (create Razorpay order) | Yes | Helper |
+| POST | `/api/payments/verify` | Verify payment signature | Yes | Helpseeker |
+| GET | `/api/payments/task/:taskId/request` | View payment request | Yes | Helpseeker |
+| GET | `/api/payments/history` | Get payment history | Yes | All |
+| POST | `/api/payments/:paymentId/refund` | Request refund | Yes | All |
 
 ### Rating Routes (`/api/ratings`)
 | Method | Endpoint | Description | Auth Required | Role |
@@ -246,7 +253,7 @@ backend-server/
 ### AI Routes (`/api/ai`) - Gemini Integration
 | Method | Endpoint | Description | Auth Required | Role |
 |--------|----------|-------------|---------------|------|
-| POST | `/api/ai/generate-task-json` | Generate task JSON from user description | No | All |
+| POST | `/api/ai/generate-task-json` | Generate task JSON from user description | Yes | All |
 
 ### Message Routes (`/api/messages`)
 | Method | Endpoint | Description | Auth Required | Role |
@@ -256,17 +263,17 @@ backend-server/
 | GET | `/api/messages/task/:taskId` | Get all messages for task (paginated) | Yes | Task Participants |
 | DELETE | `/api/messages/message/:messageId` | Delete your own message | Yes | Sender |
 
-### Helper Routes (`/api/helper`)
+### Helper Routes (`/api/helpers`)
 | Method | Endpoint | Description | Auth Required | Role |
 |--------|----------|-------------|---------------|------|
-| PATCH | `/api/helper/profile` | Update helper profile (with documents) | Yes | Helper |
-| GET | `/api/helper/profile/me` | Get my helper profile | Yes | Helper |
-| GET | `/api/helper/profile/:userId` | Get helper profile by ID | Yes | All |
-| PATCH | `/api/helper/availability` | Toggle availability (auto-creates profile) | Yes | Helper |
-| GET | `/api/helper/search` | Search helpers | Yes | All |
-| GET | `/api/helper/available/count` | Get count of available helpers | Yes | All |
-| GET | `/api/helper/tasks/active` | Get my active tasks | Yes | Helper |
-| GET | `/api/helper/:userId/tasks/completed` | Get completed tasks | Yes | All |
+| PATCH | `/api/helpers/profile` | Update helper profile (with documents) | Yes | Helper |
+| GET | `/api/helpers/profile/me` | Get my helper profile | Yes | Helper |
+| GET | `/api/helpers/profile/:userId` | Get helper profile by ID | Yes | All |
+| PATCH | `/api/helpers/availability` | Toggle availability (auto-creates profile) | Yes | Helper |
+| GET | `/api/helpers/search` | Search helpers | Yes | All |
+| GET | `/api/helpers/available/count` | Get count of available helpers | Yes | All |
+| GET | `/api/helpers/tasks/active` | Get my active tasks | Yes | Helper |
+| GET | `/api/helpers/:userId/tasks/completed` | Get completed tasks | Yes | All |
 
 ### Health Check
 | Method | Endpoint | Description | Auth Required |
@@ -287,6 +294,12 @@ backend-server/
 - Create, update, publish, and cancel tasks
 - Draft mode before publishing
 - Task queue system for published tasks
+- **Scheduled Task Publishing** (New!)
+  - Schedule tasks to publish at future date/time
+  - Automated cron job checks every minute
+  - Auto-publish when scheduled time arrives
+  - Cancel scheduled publish before it runs
+  - Status tracking: draft → scheduled → in_queue
 - Location-based task discovery
 - Budget increase functionality
 - Multi-format date support (DD-MM-YYYY, YYYY-MM-DD, ISO)
@@ -625,6 +638,106 @@ The platform integrates Google's Gemini AI to help users create structured task 
 - ✅ Consistent task quality
 - ✅ Better task categorization
 - ✅ Auto-generated steps/milestones
+
+## Scheduled Task Publishing
+
+### Overview
+Helpseekers can schedule their tasks to be automatically published at a specific date and time in the future. A background cron job runs every minute to check for tasks that are due to be published and automatically moves them to the task queue.
+
+### Features
+
+#### Scheduling
+- **Schedule Future Publishing**: Set exact date and time for task to go live
+- **Cancel Schedule**: Remove scheduled publish before it executes
+- **Status Tracking**: Task status shows `draft` → `scheduled` → `in_queue`
+- **Automated Publishing**: Cron job auto-publishes at scheduled time
+- **Validation**: Scheduled time must be in the future
+
+#### How It Works
+
+1. **Create & Schedule Task**
+   ```
+   POST /api/tasks/create          # Create draft task
+   POST /api/tasks/:taskId/schedule-publish
+   Body: { "scheduledPublishAt": "2025-10-25T10:00:00Z" }
+   ```
+
+2. **Background Processing**
+   - Cron job runs every minute (`* * * * *`)
+   - Checks for tasks where `scheduledPublishAt ≤ current time`
+   - Auto-publishes eligible tasks to queue
+   - Creates notifications for helpseeker
+   - Updates task status to `in_queue`
+
+3. **Cancel if Needed**
+   ```
+   DELETE /api/tasks/:taskId/cancel-schedule
+   ```
+
+### API Endpoints
+
+#### Schedule Task for Publishing
+**POST** `/api/tasks/:taskId/schedule-publish`
+
+**Requirements:**
+- Task must be in `draft` status
+- Scheduled time must be in the future
+- Only task creator can schedule
+
+**Request Body:**
+```json
+{
+  "scheduledPublishAt": "2025-10-25T15:30:00Z"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Task scheduled for publishing",
+  "data": {
+    "id": "task-uuid",
+    "title": "Help with moving",
+    "status": "draft",
+    "isScheduled": true,
+    "scheduledPublishAt": "2025-10-25T15:30:00Z"
+  }
+}
+```
+
+#### Cancel Scheduled Publishing
+**DELETE** `/api/tasks/:taskId/cancel-schedule`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Scheduled publish cancelled",
+  "data": {
+    "id": "task-uuid",
+    "isScheduled": false,
+    "scheduledPublishAt": null
+  }
+}
+```
+
+### Database Fields
+- `scheduledPublishAt` (DATE): Target publish date/time
+- `isScheduled` (BOOLEAN): Whether task is scheduled
+- `publishedAt` (DATE): Actual publish timestamp
+
+### Use Cases
+- Schedule task posting during peak helper activity hours
+- Set up tasks in advance for future needs
+- Coordinate task publishing with helper availability
+- Plan task workflows ahead of time
+
+### Technical Details
+- **Cron Schedule**: Runs every minute
+- **Service**: `services/taskSchedulerService.js`
+- **Initialization**: Auto-starts with server
+- **Logging**: Console logs each scheduled task published
 
 ## Task Messaging System
 
@@ -1252,6 +1365,14 @@ For support, email support@dolet.com or open an issue in the repository.
 
 ### ✨ New Features
 
+**Scheduled Task Publishing (node-cron)**
+- Schedule tasks to auto-publish at specific date/time
+- Background cron job runs every minute
+- Auto-moves scheduled tasks to queue when time arrives
+- Cancel scheduled publish before execution
+- Status tracking: draft → scheduled → in_queue
+- `/api/tasks/:taskId/schedule-publish` and `/api/tasks/:taskId/cancel-schedule` endpoints
+
 **AI-Powered Task Generation (Gemini API)**
 - Natural language to structured task data
 - Auto-extraction of title, category, budget, steps
@@ -1273,11 +1394,14 @@ For support, email support@dolet.com or open an issue in the repository.
 - Prevents premature task completion
 
 ### 📚 Documentation
-- Complete API documentation for AI features
+- Complete API documentation for all features
+- Scheduled task publishing guide with examples
+- AI task generation guide
 - Task messaging guide with examples
 - OTP completion flow diagrams
 - Updated environment variables
+- Comprehensive route documentation
 
 ---
 
-**Built with Node.js, Express, PostgreSQL, Razorpay, and Google Gemini AI**
+**Built with Node.js, Express, PostgreSQL, Razorpay, Google Gemini AI, and node-cron**
