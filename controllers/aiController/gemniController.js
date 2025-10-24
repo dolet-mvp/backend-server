@@ -7,7 +7,7 @@ const LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
 const SERVICE_ACCOUNT_KEY_PATH = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
 if (!PROJECT_ID) {
-  console.error("❌ VERTEX_PROJECT_ID not set in environment");
+  console.error("VERTEX_PROJECT_ID not set in environment");
 }
 
 // Initialize Google Auth
@@ -130,9 +130,7 @@ async function getAccessToken() {
 async function generateWithVertexAI(prompt) {
   // Try Gemini 2.5 models first (newest), then fallback to 1.5
   const modelNames = [
-    'gemini-2.0-flash-exp',
-    'gemini-exp-1206',
-    'gemini-2.0-flash-thinking-exp-1219',
+    "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"
   ];
 
   let lastError = null;
