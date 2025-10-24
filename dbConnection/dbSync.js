@@ -17,12 +17,15 @@ const initDB = (callback) => {
       require('../models/notificationModel/notificationModel');
       require('../models/trackingModel/trackingModel');
       require('../models/messageModel/messageModel');
+      require('../models/messageModel/taskMessageModel');
       require('../models/helperModel/helperModel');
+      require('../models/supportModel/supportTicketModel');
+      require('../models/supportModel/ticketReplyModel');
       
       // Load associations after all models are loaded
       require('../models/associationModel/association');
       
-      return sequelize.sync(); // Creates tables if not exist {alter:true}
+      return sequelize.sync(); // Creates tables if not exist
     })
     .then(() => {
       console.log('All models synced');

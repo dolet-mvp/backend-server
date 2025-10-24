@@ -162,6 +162,22 @@ const Task = sequelize.define(
       allowNull: true,
       defaultValue: [],
       comment: "Task steps/milestones - can be dynamically added by user"
+    },
+    // Scheduled publish fields
+    scheduledPublishAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date and time when task should be auto-published"
+    },
+    isScheduled: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      comment: "Whether task is scheduled for future publish"
+    },
+    publishedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When the task was actually published"
     }
 
    // task

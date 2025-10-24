@@ -5,6 +5,8 @@ const supabaseUpload = require("../../config/uploadConfig/supabaseUpload");
 const {
   createTask,
   publishTask,
+  scheduleTaskPublish,
+  cancelScheduledPublish,
   getMyTasks,
   updateTask,
   cancelTask,
@@ -40,6 +42,20 @@ router.post(
   "/:taskId/publish",
   authorizeRoles(["helpseeker"]),
   publishTask
+);
+
+// Schedule a task to be published at specific date/time
+router.post(
+  "/:taskId/schedule-publish",
+  authorizeRoles(["helpseeker"]),
+  scheduleTaskPublish
+);
+
+// Cancel scheduled publish
+router.delete(
+  "/:taskId/cancel-schedule",
+  authorizeRoles(["helpseeker"]),
+  cancelScheduledPublish
 );
 
 // Get all tasks created by the helpseeker

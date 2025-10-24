@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const initDB = require("./dbConnection/dbSync");
+const { initTaskScheduler } = require("./services/taskSchedulerService");
 
 const PORT = process.env.PORT || 8181;
 const app = express();
@@ -51,9 +52,10 @@ const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
 const geminiRoutes = require("./routes/aiRoute/gemniRoute");
 
 
+
 app.use("/api/auth", authRoutes);
 
-app.use("/api/ai", geminiRoutes);
+app.use("/api/ai",checkForAuthenticationCookie("token"), geminiRoutes);
 
 app.use(
   "/api/user",

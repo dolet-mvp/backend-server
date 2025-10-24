@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-const BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+const BASE_URL = process.env.GEMINI_URL;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 if (!GEMINI_API_KEY) {

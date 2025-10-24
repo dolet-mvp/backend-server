@@ -287,6 +287,124 @@ const publishTask = async (req, res) => {
   }
 };
 
+// Schedule task to be published at a specific date and time
+const scheduleTaskPublish = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { scheduledPublishAt } = req.body;
+    const userId = req.user.id;
+
+    if (!scheduledPublishAt) {
+      return res.status(400).json({
+        success: false,
+        message: "Scheduled publish date and time is required",
+      });
+    }
+
+    const task = await Task.findOne({ where: { id: taskId, userId } });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    if (task.status !== "draft") {
+      return res.status(400).json({
+        success: false,
+        message: "Only draft tasks can be scheduled for publishing",
+      });
+    }
+
+    const scheduledDate = new Date(scheduledPublishAt);
+    const currentDate = new Date();
+
+    // Validate that scheduled date is in the future
+    if (scheduledDate <= currentDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Scheduled publish time must be in the future",
+      });
+    }
+
+    // Update task with schedule information
+    task.scheduledPublishAt = scheduledDate;
+    task.isScheduled = true;
+    await task.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Task scheduled for publishing successfully",
+      data: {
+        task: {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          isScheduled: task.isScheduled,
+          scheduledPublishAt: task.scheduledPublishAt,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Schedule task publish error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to schedule task",
+      error: error.message,
+    });
+  }
+};
+
+// Cancel scheduled publish
+const cancelScheduledPublish = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const userId = req.user.id;
+
+    const task = await Task.findOne({ where: { id: taskId, userId } });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    if (!task.isScheduled) {
+      return res.status(400).json({
+        success: false,
+        message: "Task is not scheduled for publishing",
+      });
+    }
+
+    if (task.status !== "draft") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot cancel schedule for non-draft tasks",
+      });
+    }
+
+    // Cancel the schedule
+    task.scheduledPublishAt = null;
+    task.isScheduled = false;
+    await task.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Scheduled publish cancelled successfully",
+      data: { task },
+    });
+  } catch (error) {
+    console.error("Cancel scheduled publish error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to cancel scheduled publish",
+      error: error.message,
+    });
+  }
+};
+
 // Get all tasks created by helpseeker
 const getMyTasks = async (req, res) => {
   try {
@@ -1002,6 +1120,8 @@ const getPendingHelperForTask = async (req, res) => {
 module.exports = {
   createTask,
   publishTask,
+  scheduleTaskPublish,
+  cancelScheduledPublish,
   getMyTasks,
   updateTask,
   cancelTask,
