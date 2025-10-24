@@ -92,6 +92,7 @@ const prewrittenDescription = `this above is user written description to craete 
 //   allowNull: true,
 //   defaultValue: [],
 //   comment: "Task steps/milestones - can be dynamically added by user"
+//   format: [{ "id": 1, "description": "Step description here" }, { "id": 2, "description": "Another step" }]
 // }
 `;
 
@@ -130,7 +131,7 @@ async function getAccessToken() {
 async function generateWithVertexAI(prompt) {
   // Try Gemini 2.5 models first (newest), then fallback to 1.5
   const modelNames = [
-    "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"
+    "gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"
   ];
 
   let lastError = null;
@@ -145,7 +146,7 @@ async function generateWithVertexAI(prompt) {
   
   for (const modelName of modelNames) {
     try {
-      console.log(`🔄 Trying Vertex AI model: ${modelName}`);
+      console.log(` Trying Vertex AI model: ${modelName}`);
       
       // Vertex AI REST API endpoint
       const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${modelName}:generateContent`;
@@ -225,8 +226,16 @@ Prewritten description:
 Please combine these and return a single, valid JSON object for a job/task with exactly the following fields:
 title, description, category, budget, estimatedDuration, dueDate, priority, location, steps.
 - Fill the fields you can from the descriptions.
-- If a field cannot be inferred, set it to null (or [] for steps).
-- "steps" should be an array of step objects (or an empty array).
+- If a field cannot be inferred, set it to null.
+- "steps" is REQUIRED and MUST contain at least 1 step. Break down the task into logical steps.
+- "steps" MUST be an array of step objects with this EXACT format:
+  [
+    { "id": 1, "description": "First step description" },
+    { "id": 2, "description": "Second step description" }
+  ]
+  Each step object should have ONLY two fields: "id" (number) and "description" (string).
+  Generate sequential step IDs starting from 1.
+  Minimum 1 step is required.
 - Respond ONLY with the JSON object (do not add explanatory text).
 `;
 
