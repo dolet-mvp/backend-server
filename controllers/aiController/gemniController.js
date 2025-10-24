@@ -1,10 +1,25 @@
-const axios = require("axios");
+const axios = require('axios');
+const { GoogleAuth } = require('google-auth-library');
 
-const BASE_URL = process.env.GEMINI_URL;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+// Vertex AI Configuration
+const PROJECT_ID = process.env.VERTEX_PROJECT_ID || 'dolet-app';
+const LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
+const SERVICE_ACCOUNT_KEY_PATH = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
-if (!GEMINI_API_KEY) {
-  console.error("GEMINI_API_KEY not set in environment");
+if (!PROJECT_ID) {
+  console.error("❌ VERTEX_PROJECT_ID not set in environment");
+}
+
+// Initialize Google Auth
+let auth;
+try {
+  auth = new GoogleAuth({
+    keyFilename: SERVICE_ACCOUNT_KEY_PATH,
+    scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+  });
+  console.log(" Google Auth initialized for Vertex AI");
+} catch (err) {
+  console.error(" Failed to initialize Google Auth:", err.message);
 }
 
 const prewrittenDescription = `this above is user written description to craete its job on my platform , can you give me json filds in my model with above intents , you can leave which data is not provided , fill steps there , title, short description, budget, category , estimateduration , date, priority, location, from below model , and give me json fields with above intents and leave rest as empty or null so that user can edit after your json 
@@ -81,68 +96,127 @@ const prewrittenDescription = `this above is user written description to craete 
 `;
 
 
-function extractAiText(responseData) {
+
+
+function extractAiText(response) {
   try {
-    const p1 = responseData?.candidates?.[0]?.content?.parts?.[0]?.text
-      || responseData?.candidates?.[0]?.content?.[0]?.text;
-    if (p1) return p1;
-
-    const p2 = responseData?.output?.[0]?.content?.[0]?.text
-      || responseData?.output?.[0]?.content?.text;
-    if (p2) return p2;
-
-    if (Array.isArray(responseData?.candidates)) {
-      const candidateStrings = responseData.candidates
-        .map((c) => {
-          if (typeof c === "string") return c;
-          if (c?.content?.parts?.[0]?.text) return c.content.parts[0].text;
-          return null;
-        })
-        .filter(Boolean);
-      if (candidateStrings.length) return candidateStrings.join("\n\n");
+    const candidates = response?.candidates;
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      const parts = candidates[0]?.content?.parts;
+      if (Array.isArray(parts) && parts.length > 0) {
+        return parts[0]?.text || null;
+      }
     }
-
-    if (typeof responseData?.text === "string") return responseData.text;
-    if (typeof responseData?.content === "string") return responseData.content;
-
-    return JSON.stringify(responseData);
+    return null;
   } catch (err) {
+    console.error("Error extracting AI text:", err);
     return null;
   }
 }
 
-async function listAvailableModels() {
-  const url = `${BASE_URL}/models?key=${encodeURIComponent(GEMINI_API_KEY)}`;
-  const resp = await axios.get(url, { timeout: 10000 });
-  return resp.data?.models || [];
+
+async function getAccessToken() {
+  try {
+    const client = await auth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    return tokenResponse.token;
+  } catch (err) {
+    console.error("Failed to get access token:", err);
+    throw new Error('Authentication failed: ' + err.message);
+  }
 }
 
-async function tryGenerateWithModel(modelName, prompt) {
-  const url = `${BASE_URL}/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
-  const body = {
-    contents: [{ parts: [{ text: prompt }] }],
-  };
-  const resp = await axios.post(url, body, {
-    headers: { "Content-Type": "application/json" },
-    timeout: 20000,
-  });
-  return resp.data;
+
+async function generateWithVertexAI(prompt) {
+  // Try Gemini 2.5 models first (newest), then fallback to 1.5
+  const modelNames = [
+    'gemini-2.0-flash-exp',
+    'gemini-exp-1206',
+    'gemini-2.0-flash-thinking-exp-1219',
+  ];
+
+  let lastError = null;
+  
+  // Get OAuth2 access token
+  let accessToken;
+  try {
+    accessToken = await getAccessToken();
+  } catch (err) {
+    throw new Error('Failed to authenticate with Google Cloud: ' + err.message);
+  }
+  
+  for (const modelName of modelNames) {
+    try {
+      console.log(`🔄 Trying Vertex AI model: ${modelName}`);
+      
+      // Vertex AI REST API endpoint
+      const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${modelName}:generateContent`;
+      
+      console.log(`📍 Endpoint: ${endpoint}`);
+      
+      const requestBody = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: prompt }]
+          }
+        ],
+      };
+
+      const response = await axios.post(endpoint, requestBody, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        timeout: 30000
+      });
+
+      console.log(` Model ${modelName} succeeded`);
+      return response.data;
+      
+    } catch (err) {
+      lastError = err;
+      const errorMsg = err?.response?.data?.error?.message || err.message;
+      const errorStatus = err?.response?.status;
+      console.warn(` Model ${modelName} failed (${errorStatus}):`, errorMsg);
+      
+      // Log more details for debugging
+      if (err?.response?.data) {
+        console.warn('Full error response:', JSON.stringify(err.response.data, null, 2));
+      }
+    }
+  }
+
+  throw lastError || new Error('All Vertex AI models failed');
 }
 
 const generateTaskJson = async (req, res) => {
   try {
-    if (!GEMINI_API_KEY) {
+    // Validate configuration
+    if (!PROJECT_ID) {
       return res.status(500).json({
         success: false,
-        message: "Server configuration error: GEMINI_API_KEY missing.",
+        message: "Server configuration error: VERTEX_PROJECT_ID missing.",
       });
     }
 
-    const userDescription = req.body?.description ?? req.body?.text ?? null;
-    if (!userDescription || typeof userDescription !== "string" || userDescription.trim() === "") {
-      return res.status(400).json({ success: false, message: "Description required in request body." });
+    if (!auth) {
+      return res.status(500).json({
+        success: false,
+        message: "Server configuration error: Google Auth not initialized. Please set GOOGLE_APPLICATION_CREDENTIALS.",
+      });
     }
 
+    // Validate request
+    const userDescription = req.body?.description ?? req.body?.text ?? null;
+    if (!userDescription || typeof userDescription !== "string" || userDescription.trim() === "") {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Description required in request body." 
+      });
+    }
+
+    // Build prompt
     const prompt = `
 User description:
 "${userDescription}"
@@ -158,54 +232,44 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
 - Respond ONLY with the JSON object (do not add explanatory text).
 `;
 
-    let models = [];
-    try {
-      models = await listAvailableModels();
-    } catch (err) {
-      console.warn("Warning: listing models failed, will try fallbacks. Error:", err?.response?.data ?? err.message ?? err);
-    }
-    const candidateNames = (models.map(m => m.name || m).filter(Boolean))
-      .map(n => n.replace(/^models\//i, ""))
-      .filter(n => /gemini/i.test(n));
-
-    if (!candidateNames.length) {
-      candidateNames.push("gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro");
-    }
-
+    // Generate content using Vertex AI
     let aiResp = null;
-    let lastError = null;
-    for (const modelName of candidateNames) {
-      try {
-        console.log(`Trying model: ${modelName}`);
-        const data = await tryGenerateWithModel(modelName, prompt);
-        aiResp = data;
-        console.log(`Model ${modelName} succeeded.`);
-        break;
-      } catch (err) {
-        lastError = err;
-        console.warn(`Model ${modelName} failed:`, err?.response?.data ?? err.message ?? err);
-      }
-    }
-
-    if (!aiResp) {
-      console.error("All model attempts failed. Last error:", lastError?.response?.data ?? lastError?.message ?? lastError);
+    try {
+      aiResp = await generateWithVertexAI(prompt);
+    } catch (err) {
+      console.error("Vertex AI generation failed:", err);
       return res.status(500).json({
         success: false,
-        message: "No available Gemini model worked for generateContent. Check server logs.",
-        lastError: lastError?.response?.data ?? lastError?.message ?? String(lastError),
+        message: "Failed to generate content with Vertex AI. Check server logs.",
+        error: err?.message || String(err),
       });
     }
-    const aiText = extractAiText(aiResp) ?? "";
+
+    // Extract text from response
+    const aiText = extractAiText(aiResp);
+    if (!aiText) {
+      return res.status(500).json({
+        success: false,
+        message: "No text content in AI response",
+        response: aiResp,
+      });
+    }
+
+    // Parse JSON from AI response
     let taskJson = null;
     try {
       taskJson = JSON.parse(aiText);
     } catch (err) {
-      const match = aiText.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+      // Try to extract JSON from markdown code blocks or other formatting
+      const match = aiText.match(/```json\s*([\s\S]*?)\s*```/) || 
+                    aiText.match(/```\s*([\s\S]*?)\s*```/) ||
+                    aiText.match(/(\{[\s\S]*\})/);
+      
       if (match) {
         try {
-          taskJson = JSON.parse(match[0]);
+          taskJson = JSON.parse(match[1] || match[0]);
         } catch (err2) {
-          console.error("Failed to parse JSON substring from AI text:", err2);
+          console.error("Failed to parse JSON from AI text:", err2);
         }
       }
     }
@@ -213,17 +277,28 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
     if (!taskJson) {
       return res.status(500).json({
         success: false,
-        message: "AI response not valid JSON",
+        message: "AI response is not valid JSON",
         aiText,
       });
     }
 
-    if (!Array.isArray(taskJson.steps)) taskJson.steps = [];
+    // Ensure steps is an array
+    if (!Array.isArray(taskJson.steps)) {
+      taskJson.steps = [];
+    }
 
-    return res.status(200).json({ success: true, data: taskJson });
+    return res.status(200).json({ 
+      success: true, 
+      data: taskJson 
+    });
+
   } catch (error) {
-    console.error("generateTaskJson error:", error?.response?.data ?? error.message ?? error);
-    return res.status(500).json({ success: false, message: "Internal Server Error", error: error?.message ?? String(error) });
+    console.error("generateTaskJson error:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Internal Server Error", 
+      error: error?.message ?? String(error) 
+    });
   }
 };
 
