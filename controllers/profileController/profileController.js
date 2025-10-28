@@ -1,5 +1,6 @@
 const User = require("../../models/authModel/userModel");
 const Address = require("../../models/addressModel/addressModel");
+const { createToken } = require("../../services/authServices");
 
 const handleGetProfile = async (req, res) => {
   try {
@@ -71,6 +72,8 @@ const handleUpdateProfile = async (req, res) => {
 
     await user.save();
 
+    const token = createToken(user);
+
     const { password, ...userData } = user.toJSON();
 
     console.log("Updated User Data:", userData);
@@ -79,6 +82,7 @@ const handleUpdateProfile = async (req, res) => {
       success: true,
       message: "Profile updated successfully",
       user: userData,
+      token
     });
   } catch (error) {
     console.error("Update profile error:", error);
