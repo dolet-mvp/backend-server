@@ -204,6 +204,9 @@ const createTask = async (req, res) => {
       steps: steps || []
     });
 
+    console.log("✅ Task created successfully! Task ID:", task.id);
+    console.log("👤 User ID:", userId);
+
     res.status(201).json({
       success: true,
       message: "Task created successfully",
@@ -406,7 +409,11 @@ const cancelScheduledPublish = async (req, res) => {
 const getMyTasks = async (req, res) => {
   try {
     const userId = req.user.id;
+
     const { status } = req.query;
+
+    console.log("📋 Getting tasks for userId:", userId);
+    console.log("🔍 Status filter:", status || "all");
 
     const whereClause = { userId };
     if (status) {
@@ -425,15 +432,58 @@ const getMyTasks = async (req, res) => {
       ],
     });
 
+    console.log(`✅ Found ${tasks.length} tasks for user`);
+
     res.status(200).json({
       success: true,
       data: tasks,
     });
   } catch (error) {
-    console.error("Get my tasks error:", error);
+    console.error("❌ Get my tasks error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch tasks",
+      error: error.message,
+    });
+  }
+};
+
+// Get task by ID with full details (Helpseeker)
+const getTaskById = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { taskId } = req.params;
+
+    const task = await Task.findOne({
+      where: { 
+        id: taskId, 
+        userId 
+      },
+      include: [
+        {
+          model: User,
+          as: "assignedHelper",
+          attributes: ["id", "fullName", "profilePhoto", "phone", "email"],
+        },
+      ],
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: task,
+    });
+  } catch (error) {
+    console.error("Get task by ID error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch task details",
       error: error.message,
     });
   }
@@ -499,12 +549,6 @@ const updateTask = async (req, res) => {
     if (updateData.steps && Array.isArray(updateData.steps)) {
       for (let i = 0; i < updateData.steps.length; i++) {
         const step = updateData.steps[i];
-        if (!step.title || typeof step.title !== 'string') {
-          return res.status(400).json({
-            success: false,
-            message: `Step ${i + 1} must have a title`,
-          });
-        }
         // Ensure default values for step
         step.order = step.order || i + 1;
         step.isCompleted = step.isCompleted !== undefined ? step.isCompleted : false;
@@ -1120,6 +1164,7 @@ module.exports = {
   scheduleTaskPublish,
   cancelScheduledPublish,
   getMyTasks,
+  getTaskById,
   updateTask,
   cancelTask,
   increaseReward,

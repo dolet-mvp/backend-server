@@ -8,6 +8,7 @@ const {
   scheduleTaskPublish,
   cancelScheduledPublish,
   getMyTasks,
+  getTaskById,
   updateTask,
   cancelTask,
   increaseReward,
@@ -63,6 +64,13 @@ router.get(
   "/my-tasks",
   authorizeRoles(["helpseeker"]),
   getMyTasks
+);
+
+// Get task by ID with full details
+router.get(
+  "/:taskId",
+  authorizeRoles(["helpseeker"]),
+  getTaskById
 );
 
 
