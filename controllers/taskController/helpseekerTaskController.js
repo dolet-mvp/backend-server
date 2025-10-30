@@ -80,13 +80,7 @@ const createTask = async (req, res) => {
       }
     }
 
-    // Validate required fields
-    if (!title || !description || !category || !budget) {
-      return res.status(400).json({
-        success: false,
-        message: "Title, description, category, and budget are required",
-      });
-    }
+
 
     // Validate location if task requires it
     if (locationRequired === 'true' || locationRequired === true) {

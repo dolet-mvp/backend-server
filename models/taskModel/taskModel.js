@@ -21,17 +21,17 @@ const Task = sequelize.define(
     //
     title: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     description: {
       type: DataTypes.TEXT,
-      allowNull: false,
+      allowNull: true,
     },
 
     //
     category: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     skillsRequired: {
       type: DataTypes.JSON, 
@@ -39,7 +39,7 @@ const Task = sequelize.define(
     },
     budget: {
       type: DataTypes.DECIMAL(10, 2),
-      allowNull: false,
+      allowNull: true,
     },
     estimatedDuration: {
       type: DataTypes.INTEGER,
