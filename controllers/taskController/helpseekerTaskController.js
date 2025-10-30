@@ -2,6 +2,8 @@ const Task = require("../../models/taskModel/taskModel");
 const TaskQueue = require("../../models/queueModel/queueModel");
 const Notification = require("../../models/notificationModel/notificationModel");
 const User = require("../../models/authModel/userModel");
+const HelperProfile = require("../../models/helperModel/helperModel");
+const Address = require("../../models/addressModel/addressModel");
 
 // Generate 6-digit OTP
 const generateOTP = () => {
@@ -484,6 +486,304 @@ const getTaskById = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch task details",
+      error: error.message,
+    });
+  }
+};
+
+// Helper function to calculate distance between two coordinates (Haversine formula)
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) *
+      Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c;
+  return distance; // Returns distance in kilometers
+};
+
+// Get nearby helpers within radius (Helpseeker)
+const getNearbyHelpers = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { radius = 10, skill } = req.query;
+
+    console.log("🗺️ Searching for helpers near user:", userId);
+
+    // Get user's address with coordinates
+    const userAddress = await Address.findOne({
+      where: {
+        userId: userId,
+        latitude: {
+          [require("sequelize").Op.ne]: null,
+        },
+        longitude: {
+          [require("sequelize").Op.ne]: null,
+        },
+      },
+      order: [
+        ["isDefault", "DESC"], // Prefer default address
+        ["createdAt", "DESC"],  // Or most recent address
+      ],
+    });
+
+    if (!userAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "No address with coordinates found for your account. Please add your location in profile settings.",
+      });
+    }
+
+    const lat = parseFloat(userAddress.latitude);
+    const lng = parseFloat(userAddress.longitude);
+    const searchRadius = parseFloat(radius);
+
+    console.log("📍 User location:", {
+      latitude: lat,
+      longitude: lng,
+      city: userAddress.city,
+      state: userAddress.state,
+      addressType: userAddress.type,
+      isDefault: userAddress.isDefault
+    });
+
+    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid coordinates",
+      });
+    }
+
+    console.log("🔍 Search filters:");
+    console.log(`   Radius: ${searchRadius} km`);
+    console.log(`   Skill filter: ${skill || 'none (all skills)'}`);
+    console.log("\n🔎 Step 1: Checking total helpers in database...");
+
+    // First, check how many helpers exist at all
+    const totalHelpers = await User.count({ where: { role: "helper" } });
+    console.log(`   Total users with role='helper': ${totalHelpers}`);
+
+    // Check how many have addresses
+    const helpersWithAddresses = await User.count({
+      where: { role: "helper" },
+      include: [
+        {
+          model: Address,
+          as: "addresses",
+          required: true,
+          where: {
+            latitude: { [require("sequelize").Op.ne]: null },
+            longitude: { [require("sequelize").Op.ne]: null },
+          },
+        },
+      ],
+    });
+    console.log(`   Helpers with valid addresses: ${helpersWithAddresses}`);
+
+    // Check how many have profiles
+    const helpersWithProfiles = await User.count({
+      where: { role: "helper" },
+      include: [
+        {
+          model: HelperProfile,
+          as: "helperProfile",
+          required: true,
+        },
+      ],
+    });
+    console.log(`   Helpers with profiles: ${helpersWithProfiles}`);
+
+    console.log("\n🔎 Step 2: Querying helpers with BOTH address AND profile...");
+
+    // Get all helpers with their addresses and profiles
+    const helpers = await User.findAll({
+      where: {
+        role: "helper",
+      },
+      attributes: ["id", "fullName", "profilePhoto", "phone", "email", "role"],
+      include: [
+        {
+          model: Address,
+          as: "addresses",
+          where: {
+            latitude: {
+              [require("sequelize").Op.ne]: null,
+            },
+            longitude: {
+              [require("sequelize").Op.ne]: null,
+            },
+          },
+          required: true,
+          attributes: ["latitude", "longitude", "city", "state", "type", "isDefault"],
+        },
+        {
+          model: HelperProfile,
+          as: "helperProfile",
+          required: true,
+          where: skill
+            ? {
+                skills: {
+                  [require("sequelize").Op.contains]: [skill],
+                },
+              }
+            : {},
+          attributes: [
+            "skills",
+            "hourlyRate",
+            "serviceRadius",
+            "isAvailable",
+            "completedTasks",
+            "averageRating",
+          ],
+        },
+      ],
+    });
+
+    console.log(`📍 Found ${helpers.length} helpers with BOTH address AND profile`);
+    
+    if (helpers.length === 0 && totalHelpers > 0) {
+      console.log("\n❌ ISSUE IDENTIFIED:");
+      if (helpersWithAddresses === 0) {
+        console.log("   Problem: Helpers exist but NONE have addresses with coordinates");
+        console.log("   Solution: Add addresses to helper users");
+      } else if (helpersWithProfiles === 0) {
+        console.log("   Problem: Helpers exist but NONE have helper profiles");
+        console.log("   Solution: Create helper_profiles for helper users");
+      } else {
+        console.log("   Problem: Helpers have addresses OR profiles, but not BOTH");
+        console.log("   Solution: Ensure each helper has BOTH address AND profile");
+      }
+    }
+
+    // Debug: Log all helpers found
+    if (helpers.length === 0) {
+      console.log("⚠️ No helpers found in database with addresses and profiles");
+      console.log("💡 Possible reasons:");
+      console.log("   1. No users with role='helper'");
+      console.log("   2. Helpers don't have addresses with lat/lng");
+      console.log("   3. Helpers don't have helper profiles");
+      if (skill) {
+        console.log(`   4. No helpers have the skill: '${skill}'`);
+      }
+    } else {
+      console.log(`🔍 Processing ${helpers.length} helpers...`);
+    }
+
+    // Filter helpers within radius and format response
+    const nearbyHelpers = [];
+    const debugInfo = {
+      totalHelpers: helpers.length,
+      processedHelpers: 0,
+      skippedNoAddress: 0,
+      skippedInvalidCoords: 0,
+      skippedOutOfRadius: 0,
+      skippedNotAvailable: 0,
+      withinRadius: 0
+    };
+
+    for (const helper of helpers) {
+      debugInfo.processedHelpers++;
+      
+      // Get default address or first available address
+      const address = helper.addresses.find((addr) => addr.isDefault) || helper.addresses[0];
+      
+      if (!address) {
+        debugInfo.skippedNoAddress++;
+        console.log(`⚠️ Helper ${helper.fullName} (${helper.id}): No address found`);
+        continue;
+      }
+
+      const helperLat = parseFloat(address.latitude);
+      const helperLng = parseFloat(address.longitude);
+
+      if (isNaN(helperLat) || isNaN(helperLng)) {
+        debugInfo.skippedInvalidCoords++;
+        console.log(`⚠️ Helper ${helper.fullName} (${helper.id}): Invalid coordinates (${address.latitude}, ${address.longitude})`);
+        continue;
+      }
+
+      // Calculate distance
+      const distance = calculateDistance(lat, lng, helperLat, helperLng);
+      
+      console.log(`📏 Helper ${helper.fullName}:`);
+      console.log(`   Location: (${helperLat}, ${helperLng}) - ${address.city}`);
+      console.log(`   Distance: ${distance.toFixed(2)} km`);
+      console.log(`   Available: ${helper.helperProfile.isAvailable}`);
+      console.log(`   Skills: ${JSON.stringify(helper.helperProfile.skills || [])}`);
+
+      // Check if within radius
+      if (distance > searchRadius) {
+        debugInfo.skippedOutOfRadius++;
+        console.log(`   ❌ Outside radius (${distance.toFixed(2)} km > ${searchRadius} km)`);
+        continue;
+      }
+
+      // Check if available
+      if (!helper.helperProfile.isAvailable) {
+        debugInfo.skippedNotAvailable++;
+        console.log(`   ❌ Helper not available`);
+        continue;
+      }
+
+      debugInfo.withinRadius++;
+      console.log(`   ✅ Added to results!`);
+
+      nearbyHelpers.push({
+        id: helper.id,
+        fullName: helper.fullName,
+        profilePhoto: helper.profilePhoto,
+        phone: helper.phone,
+        email: helper.email,
+        skills: helper.helperProfile.skills || [],
+        hourlyRate: parseFloat(helper.helperProfile.hourlyRate) || 0,
+        rating: parseFloat(helper.helperProfile.averageRating) || 0,
+        completedTasks: helper.helperProfile.completedTasks || 0,
+        serviceRadius: helper.helperProfile.serviceRadius || 10,
+        location: {
+          latitude: helperLat,
+          longitude: helperLng,
+          city: address.city,
+          state: address.state,
+        },
+        distance: parseFloat(distance.toFixed(2)), // Distance in km
+      });
+    }
+
+    // Sort by distance (nearest first)
+    nearbyHelpers.sort((a, b) => a.distance - b.distance);
+
+    console.log("\n📊 SEARCH SUMMARY:");
+    console.log(`   Total helpers in DB: ${debugInfo.totalHelpers}`);
+    console.log(`   Processed: ${debugInfo.processedHelpers}`);
+    console.log(`   Skipped (no address): ${debugInfo.skippedNoAddress}`);
+    console.log(`   Skipped (invalid coords): ${debugInfo.skippedInvalidCoords}`);
+    console.log(`   Skipped (out of radius): ${debugInfo.skippedOutOfRadius}`);
+    console.log(`   Skipped (not available): ${debugInfo.skippedNotAvailable}`);
+    console.log(`   ✅ Within radius & available: ${debugInfo.withinRadius}`);
+    console.log(`\n✅ Returning ${nearbyHelpers.length} helpers within ${searchRadius}km`);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        searchLocation: {
+          latitude: lat,
+          longitude: lng,
+        },
+        radius: searchRadius,
+        count: nearbyHelpers.length,
+        helpers: nearbyHelpers,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Get nearby helpers error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch nearby helpers",
       error: error.message,
     });
   }
@@ -1165,6 +1465,7 @@ module.exports = {
   cancelScheduledPublish,
   getMyTasks,
   getTaskById,
+  getNearbyHelpers,
   updateTask,
   cancelTask,
   increaseReward,

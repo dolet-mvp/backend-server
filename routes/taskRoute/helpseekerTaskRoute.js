@@ -9,6 +9,7 @@ const {
   cancelScheduledPublish,
   getMyTasks,
   getTaskById,
+  getNearbyHelpers,
   updateTask,
   cancelTask,
   increaseReward,
@@ -64,6 +65,13 @@ router.get(
   "/my-tasks",
   authorizeRoles(["helpseeker"]),
   getMyTasks
+);
+
+// Get nearby helpers within radius
+router.get(
+  "/nearby-helpers",
+  authorizeRoles(["helpseeker"]),
+  getNearbyHelpers
 );
 
 // Get task by ID with full details
