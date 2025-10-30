@@ -75,12 +75,7 @@ const createTask = async (req, res) => {
     if (steps && Array.isArray(steps)) {
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
-        if (!step.title || typeof step.title !== 'string') {
-          return res.status(400).json({
-            success: false,
-            message: `Step ${i + 1} must have a title`,
-          });
-        }
+     
         // Set default values for step
         step.order = step.order || i + 1;
         step.isCompleted = step.isCompleted || false;
