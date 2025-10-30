@@ -12,6 +12,16 @@ const generateOTP = () => {
 const createTask = async (req, res) => {
   try {
     const userId = req.user.id;
+    
+    // Verify user exists in database
+    const userExists = await User.findByPk(userId);
+    if (!userExists) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found. Please log in again.",
+      });
+    }
+    
     let {
       title,
       description,
