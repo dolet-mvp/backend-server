@@ -358,7 +358,7 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
       taskJson.steps = [];
     }
     
-    console.log(`✅ Task validated: ${taskJson.steps.length} steps found`);
+    // Add default values for required fields to prevent null 
     
     // Generate unique task ID
     const taskId = crypto.randomUUID();
