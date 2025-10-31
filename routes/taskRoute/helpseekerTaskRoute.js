@@ -8,16 +8,11 @@ const {
   scheduleTaskPublish,
   cancelScheduledPublish,
   getMyTasks,
-  getTaskById,
   getNearbyHelpers,
   updateTask,
   cancelTask,
   increaseReward,
-  approveHelperRequest,
-  rejectHelperRequest,
   regenerateOTP,
-  getTasksWithPendingHelpers,
-  getPendingHelperForTask,
 } = require("../../controllers/taskController/helpseekerTaskController");
 
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
@@ -93,40 +88,14 @@ router.patch(
 );
 
 
-// Get tasks with pending helper requests
-router.get(
-  "/pending-helpers",
-  authorizeRoles(["helpseeker","helper"]),
-  getTasksWithPendingHelpers
-);
-
-// Get pending helper for a specific task
-router.get(
-  "/:taskId/pending-helper",
-  authorizeRoles(["helpseeker"]),
-  getPendingHelperForTask
-);
-
-
-// Approve helper's request to accept task (generates OTP)
-router.post(
-  "/:taskId/approve-helper",
-  authorizeRoles(["helpseeker"]),
-  approveHelperRequest
-);
-
-// Reject helper's request to accept task
-router.post(
-  "/:taskId/reject-helper",
-  authorizeRoles(["helpseeker"]),
-  rejectHelperRequest
-);
-
 // Regenerate OTP for assigned task
 router.post(
   "/:taskId/regenerate-otp",
   authorizeRoles(["helpseeker"]),
   regenerateOTP
 );
+
+// Note: Helper approval/rejection routes removed - helpers now accept tasks directly
+// OTP is automatically generated when helper accepts the task
 
 module.exports = router;

@@ -38,6 +38,26 @@ const getAvailableTasks = async (req, res) => {
       radius = 50 
     } = req.query;
 
+    // Check if helper is available/online
+    if (helperId) {
+      const HelperProfile = require("../../models/helperModel/helperModel");
+      const helperProfile = await HelperProfile.findOne({ 
+        where: { userId: helperId } 
+      });
+
+      if (!helperProfile || !helperProfile.isAvailable) {
+        return res.status(200).json({
+          success: true,
+          message: "You are currently offline. Please go online to see available tasks.",
+          data: [],
+          meta: {
+            isHelperAvailable: false,
+            helperStatus: "offline",
+          },
+        });
+      }
+    }
+
     let helperLat, helperLng;
     let helperAddress = null;
 
@@ -151,6 +171,8 @@ const getAvailableTasks = async (req, res) => {
       message: `Found ${nearbyTasks.length} tasks within ${searchRadius}km`,
       data: nearbyTasks,
       meta: {
+        isHelperAvailable: true,
+        helperStatus: "online",
         helperLocation: { 
           lat: helperLat, 
           lng: helperLng,
@@ -183,19 +205,18 @@ const getAvailableTasks = async (req, res) => {
   }
 };
 
-// Request to accept task (Helper) - Step 1: Helper requests to accept
-const requestToAcceptTask = async (req, res) => {
+// Accept task directly (Helper) - Generates OTP and assigns task
+const acceptTask = async (req, res) => {
   try {
     const helperId = req.user.id;
     const { taskId } = req.params;
-    const { message } = req.body; // Optional message to helpseeker
 
     const task = await Task.findByPk(taskId, {
       include: [
         {
           model: User,
           as: "creator",
-          attributes: ["id", "fullName", "email"],
+          attributes: ["id", "fullName", "email", "phone"],
         },
       ],
     });
@@ -210,30 +231,15 @@ const requestToAcceptTask = async (req, res) => {
     if (task.status !== "in_queue") {
       return res.status(400).json({
         success: false,
-        message: "Task is not available for acceptance requests",
+        message: "Task is not available for acceptance",
       });
     }
 
-    if (!task.allowDirectAcceptance) {
+    // Check if task is already assigned
+    if (task.assignedHelperId) {
       return res.status(400).json({
         success: false,
-        message: "This task requires bidding. Please place a bid instead.",
-      });
-    }
-
-    // Check if this helper already requested
-    if (task.pendingHelperId === helperId) {
-      return res.status(400).json({
-        success: false,
-        message: "You have already requested to accept this task. Waiting for helpseeker approval.",
-      });
-    }
-
-    // Check if another helper is already pending
-    if (task.pendingHelperId) {
-      return res.status(400).json({
-        success: false,
-        message: "Another helper's request is pending for this task.",
+        message: "This task has already been accepted by another helper",
       });
     }
 
@@ -242,49 +248,149 @@ const requestToAcceptTask = async (req, res) => {
       attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
     });
 
-    // Store pending helper ID
-    task.pendingHelperId = helperId;
+    // Generate OTP
+    const otp = generateOTP();
+
+    // Update task - assign to helper and generate OTP
+    task.assignedHelperId = helperId;
+    task.status = "assigned";
+    task.acceptedAt = new Date();
+    task.verificationOtp = otp;
+    task.otpGeneratedAt = new Date();
+    task.isOtpVerified = false;
     await task.save();
 
-    // Notify helpseeker for approval
+    // Remove from queue if exists
+    await TaskQueue.destroy({
+      where: { taskId: task.id },
+    });
+
+    // Notify helpseeker with OTP and helper details
     await Notification.create({
       userId: task.userId,
       taskId: task.id,
-      title: "Helper Wants to Accept Your Task",
-      message: `${helper.fullName} has requested to accept your task "${task.title}". ${message ? `Message: ${message}` : ''} Please review and approve or reject.`,
-      type: "helper_request",
+      title: "Task Accepted by Helper",
+      message: `${helper.fullName} has accepted your task "${task.title}". OTP: ${otp}. Share this OTP with the helper to start the task.`,
+      type: "task_accepted",
       priority: "high",
+      data: {
+        otp: otp,
+        helper: {
+          id: helper.id,
+          name: helper.fullName,
+          email: helper.email,
+          phone: helper.phone,
+          profilePhoto: helper.profilePhoto,
+        },
+      },
     });
 
     // Notify helper
     await Notification.create({
       userId: helperId,
       taskId: task.id,
-      title: "Request Sent",
-      message: `Your request to accept "${task.title}" has been sent to ${task.creator.fullName}. Waiting for approval.`,
-      type: "request_sent",
+      title: "Task Accepted Successfully",
+      message: `You have accepted "${task.title}". The helpseeker will share the OTP with you to start the task. Contact: ${task.creator.fullName} (${task.creator.phone || task.creator.email})`,
+      type: "task_accepted",
+      priority: "high",
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Task accepted successfully. OTP has been sent to the helpseeker.",
+      data: {
+        taskId: task.id,
+        taskTitle: task.title,
+        status: "assigned",
+        acceptedAt: task.acceptedAt,
+        helpseeker: {
+          id: task.creator.id,
+          name: task.creator.fullName,
+          email: task.creator.email,
+          phone: task.creator.phone,
+        },
+        message: "Wait for helpseeker to share the OTP with you to start the task",
+      },
+    });
+  } catch (error) {
+    console.error("Accept task error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to accept task",
+      error: error.message,
+    });
+  }
+};
+
+// Reject task with reason (Helper)
+const rejectTask = async (req, res) => {
+  try {
+    const helperId = req.user.id;
+    const { taskId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a reason for rejecting this task",
+      });
+    }
+
+    const task = await Task.findByPk(taskId, {
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "fullName"],
+        },
+      ],
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    if (task.status !== "in_queue") {
+      return res.status(400).json({
+        success: false,
+        message: "This task is no longer available",
+      });
+    }
+
+    // Get helper details
+    const helper = await User.findByPk(helperId, {
+      attributes: ["id", "fullName"],
+    });
+
+    // Log the rejection (optional - you can create a rejection table if needed)
+    // For now, we'll just notify the helpseeker
+
+    // Notify helpseeker about rejection
+    await Notification.create({
+      userId: task.userId,
+      taskId: task.id,
+      title: "Task Declined",
+      message: `${helper.fullName} has declined your task "${task.title}". Reason: ${reason}`,
+      type: "task_rejected",
       priority: "medium",
     });
 
     res.status(200).json({
       success: true,
-      message: "Request sent to helpseeker. Waiting for approval.",
+      message: "Task rejected successfully",
       data: {
         taskId: task.id,
-        taskTitle: task.title,
-        helpseeker: {
-          id: task.creator.id,
-          name: task.creator.fullName,
-        },
-        requestedAt: new Date(),
-        status: "pending_approval",
+        reason: reason,
       },
     });
   } catch (error) {
-    console.error("Request to accept task error:", error);
+    console.error("Reject task error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to send request",
+      message: "Failed to reject task",
       error: error.message,
     });
   }
@@ -403,59 +509,9 @@ const verifyOTPAndStartTask = async (req, res) => {
   }
 };
 
-// Cancel acceptance request (Helper)
-const cancelAcceptanceRequest = async (req, res) => {
-  try {
-    const helperId = req.user.id;
-    const { taskId } = req.params;
-
-    const task = await Task.findByPk(taskId);
-
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        message: "Task not found",
-      });
-    }
-
-    if (task.pendingHelperId !== helperId) {
-      return res.status(400).json({
-        success: false,
-        message: "You don't have a pending request for this task",
-      });
-    }
-
-    // Clear pending helper
-    task.pendingHelperId = null;
-    await task.save();
-
-    // Notify helpseeker
-    await Notification.create({
-      userId: task.userId,
-      taskId: task.id,
-      title: "Helper Request Cancelled",
-      message: `Helper has cancelled their request to accept "${task.title}"`,
-      type: "request_cancelled",
-      priority: "low",
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Acceptance request cancelled successfully",
-    });
-  } catch (error) {
-    console.error("Cancel acceptance request error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to cancel request",
-      error: error.message,
-    });
-  }
-};
-
 module.exports = {
   getAvailableTasks,
-  requestToAcceptTask,
+  acceptTask,
+  rejectTask,
   verifyOTPAndStartTask,
-  cancelAcceptanceRequest,
 };

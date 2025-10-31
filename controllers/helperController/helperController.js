@@ -190,8 +190,11 @@ const toggleAvailability = async (req, res) => {
 
       return res.status(201).json({
         success: true,
-        message: "Helper profile created and you are now available",
-        data: helperProfile,
+        message: "You are now online and available for tasks",
+        data: {
+          isAvailable: helperProfile.isAvailable,
+          profile: helperProfile,
+        },
       });
     }
 
@@ -202,9 +205,12 @@ const toggleAvailability = async (req, res) => {
     res.status(200).json({
       success: true,
       message: `You are now ${
-        helperProfile.isAvailable ? "available" : "unavailable"
+        helperProfile.isAvailable ? "online" : "offline"
       }`,
-      data: helperProfile,
+      data: {
+        isAvailable: helperProfile.isAvailable,
+        profile: helperProfile,
+      },
     });
   } catch (error) {
     console.error("Toggle availability error:", error);

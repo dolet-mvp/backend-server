@@ -3,40 +3,39 @@ const router = express.Router();
 
 const {
   getAvailableTasks,
-  requestToAcceptTask,
+  acceptTask,
+  rejectTask,
   verifyOTPAndStartTask,
-  cancelAcceptanceRequest,
 } = require("../../controllers/taskController/helperTaskController");
 
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
 
-
-
+// Get available tasks for helper
 router.get(
   "/available",
-  authorizeRoles(["helper","helpseeker"]),
+  authorizeRoles(["helper"]),
   getAvailableTasks
 );
 
-// Request to accept a task (Step 1 of approval process)
+// Accept task directly (generates OTP and assigns to helper)
 router.post(
-  "/:taskId/request-accept",
-  authorizeRoles(["helper","helpseeker"]),
-  requestToAcceptTask
+  "/:taskId/accept",
+  authorizeRoles(["helper"]),
+  acceptTask
 );
 
-// Verify OTP and start task (Step 3 of approval process)
+// Reject task with reason
+router.post(
+  "/:taskId/reject",
+  authorizeRoles(["helper"]),
+  rejectTask
+);
+
+// Verify OTP and start task
 router.post(
   "/:taskId/verify-otp",
-  authorizeRoles(["helper","helpseeker"]),
+  authorizeRoles(["helper"]),
   verifyOTPAndStartTask
-);
-
-// Cancel acceptance request
-router.delete(
-  "/:taskId/cancel-request",
-  authorizeRoles(["helper","helpseeker"]),
-  cancelAcceptanceRequest
 );
 
 module.exports = router;
