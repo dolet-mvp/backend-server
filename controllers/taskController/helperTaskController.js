@@ -271,18 +271,8 @@ const acceptTask = async (req, res) => {
       taskId: task.id,
       title: "Task Accepted by Helper",
       message: `${helper.fullName} has accepted your task "${task.title}". OTP: ${otp}. Share this OTP with the helper to start the task.`,
-      type: "task_accepted",
+      type: "task_assigned",
       priority: "high",
-      data: {
-        otp: otp,
-        helper: {
-          id: helper.id,
-          name: helper.fullName,
-          email: helper.email,
-          phone: helper.phone,
-          profilePhoto: helper.profilePhoto,
-        },
-      },
     });
 
     // Notify helper
@@ -291,7 +281,7 @@ const acceptTask = async (req, res) => {
       taskId: task.id,
       title: "Task Accepted Successfully",
       message: `You have accepted "${task.title}". The helpseeker will share the OTP with you to start the task. Contact: ${task.creator.fullName} (${task.creator.phone || task.creator.email})`,
-      type: "task_accepted",
+      type: "task_assigned",
       priority: "high",
     });
 
@@ -374,7 +364,7 @@ const rejectTask = async (req, res) => {
       taskId: task.id,
       title: "Task Declined",
       message: `${helper.fullName} has declined your task "${task.title}". Reason: ${reason}`,
-      type: "task_rejected",
+      type: "bid_rejected",
       priority: "medium",
     });
 
