@@ -21,7 +21,7 @@ const { authorizeRoles } = require("../../middleware/roleMiddleware");
 // Create a new task
 router.post(
   "/create",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"]),
   supabaseUpload.array("attachments", 5),
   createTask
 );
@@ -29,7 +29,7 @@ router.post(
 // Update a draft task
 router.put(
   "/:taskId",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"]),
   supabaseUpload.array("attachments", 5),
   updateTask
 );
@@ -37,21 +37,21 @@ router.put(
 // Publish a task to the queue
 router.post(
   "/:taskId/publish",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"]),
   publishTask
 );
 
 // Schedule a task to be published at specific date/time
 router.post(
   "/:taskId/schedule-publish",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"]),
   scheduleTaskPublish
 );
 
 // Cancel scheduled publish
 router.delete(
   "/:taskId/cancel-schedule",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"]),
   cancelScheduledPublish
 );
 
