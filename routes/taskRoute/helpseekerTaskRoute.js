@@ -63,14 +63,14 @@ router.delete(
 // Get all tasks created by the helpseeker
 router.get(
   "/my-tasks",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"]),
   getMyTasks
 );
 
 // Get nearby helpers within radius
 router.get(
   "/nearby-helpers",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"]),
   getNearbyHelpers
 );
 
@@ -80,14 +80,15 @@ router.get(
 // Cancel a task
 router.delete(
   "/:taskId/cancel",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"
+  ]),
   cancelTask
 );
 
 // Increase task reward/budget
 router.patch(
   "/:taskId/increase-reward",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"]),
   increaseReward
 );
 
@@ -95,7 +96,7 @@ router.patch(
 // Get tasks with pending helper requests
 router.get(
   "/pending-helpers",
-  authorizeRoles(["helpseeker"]),
+  authorizeRoles(["helpseeker","helper"]),
   getTasksWithPendingHelpers
 );
 
