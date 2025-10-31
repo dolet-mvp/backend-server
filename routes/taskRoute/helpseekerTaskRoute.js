@@ -74,13 +74,8 @@ router.get(
   getNearbyHelpers
 );
 
-// Get task by ID with full details
-router.get(
-  "/:taskId",
-  authorizeRoles(["helpseeker"]),
-  getTaskById
-);
-
+// Note: /:taskId route is defined in taskRoute.js (commonTaskController)
+// to avoid routing conflicts with specific routes like /available
 
 // Cancel a task
 router.delete(

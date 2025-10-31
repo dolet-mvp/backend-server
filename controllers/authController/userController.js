@@ -12,11 +12,13 @@ const handleRegister = async (req, res) => {
     let user = await User.findOne({ where: { phone } });
 
     if (!user) {
+      console.log("Creating new user with phone:", phone);
       user = await User.create({
         phone,
         isVerified: true,
       });
     } else {
+      console.log("User already exists with phone:", phone);
       await user.save();
     }
 
