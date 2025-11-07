@@ -108,7 +108,6 @@ const approveHelper = async (req, res) => {
 
     // Approve helper
     helper.verificationStatus = "approved";
-    helper.isVerified = true;
     helper.approvedBy = adminId;
     helper.isApproved = true; // Can now start taking tasks
     await helper.save();

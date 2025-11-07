@@ -31,7 +31,7 @@ const Helper = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
-    isVerified: {
+    isAvailable: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
     },

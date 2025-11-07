@@ -68,80 +68,9 @@ const getNotifications = async (req, res) => {
   }
 };
 
-// Mark notification as read
-const markAsRead = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const userType = req.user.userType;
-    const { notificationId } = req.params;
 
-    const whereClause = { id: notificationId, userType };
-    if (userType === 'helper') {
-      whereClause.helperId = userId;
-    } else if (userType === 'helpseeker') {
-      whereClause.helpseekerId = userId;
-    }
 
-    const notification = await Notification.findOne({
-      where: whereClause,
-    });
 
-    if (!notification) {
-      return res.status(404).json({
-        success: false,
-        message: "Notification not found",
-      });
-    }
-
-    notification.isRead = true;
-    await notification.save();
-
-    res.status(200).json({
-      success: true,
-      message: "Notification marked as read",
-      data: notification,
-    });
-  } catch (error) {
-    console.error("Mark as read error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to mark notification as read",
-      error: error.message,
-    });
-  }
-};
-
-// Mark all notifications as read
-const markAllAsRead = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const userType = req.user.userType;
-
-    const whereClause = { userType, isRead: false };
-    if (userType === 'helper') {
-      whereClause.helperId = userId;
-    } else if (userType === 'helpseeker') {
-      whereClause.helpseekerId = userId;
-    }
-
-    await Notification.update(
-      { isRead: true },
-      { where: whereClause }
-    );
-
-    res.status(200).json({
-      success: true,
-      message: "All notifications marked as read",
-    });
-  } catch (error) {
-    console.error("Mark all as read error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to mark all notifications as read",
-      error: error.message,
-    });
-  }
-};
 
 // Delete notification
 const deleteNotification = async (req, res) => {
@@ -184,73 +113,10 @@ const deleteNotification = async (req, res) => {
   }
 };
 
-// Clear all read notifications
-const clearReadNotifications = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const userType = req.user.userType;
 
-    const whereClause = { userType, isRead: true };
-    if (userType === 'helper') {
-      whereClause.helperId = userId;
-    } else if (userType === 'helpseeker') {
-      whereClause.helpseekerId = userId;
-    }
 
-    await Notification.destroy({
-      where: whereClause,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Read notifications cleared successfully",
-    });
-  } catch (error) {
-    console.error("Clear read notifications error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to clear read notifications",
-      error: error.message,
-    });
-  }
-};
-
-// Get unread count
-const getUnreadCount = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const userType = req.user.userType;
-
-    const whereClause = { userType, isRead: false };
-    if (userType === 'helper') {
-      whereClause.helperId = userId;
-    } else if (userType === 'helpseeker') {
-      whereClause.helpseekerId = userId;
-    }
-
-    const unreadCount = await Notification.count({
-      where: whereClause,
-    });
-
-    res.status(200).json({
-      success: true,
-      data: { unreadCount },
-    });
-  } catch (error) {
-    console.error("Get unread count error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to get unread count",
-      error: error.message,
-    });
-  }
-};
 
 module.exports = {
   getNotifications,
-  markAsRead,
-  markAllAsRead,
   deleteNotification,
-  clearReadNotifications,
-  getUnreadCount,
 };

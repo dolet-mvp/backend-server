@@ -4,9 +4,7 @@ const supabaseUpload = require("../../config/uploadConfig/supabaseUpload");
 const {
   updateOnTheWay,
   markArrived,
-  startWork,
   completeWork,
-  verifyCompletionOtp,
   getTaskTracking,
   updateLocation,
 } = require("../../controllers/trackingController/trackingController");
@@ -28,25 +26,11 @@ router.post(
 );
 
 router.post(
-  "/task/:taskId/start-work",
-  checkForAuthenticationCookie(),
-  checkUserType(["helper"]),
-  startWork
-);
-
-router.post(
   "/task/:taskId/complete-work",
   checkForAuthenticationCookie(),
   checkUserType(["helper"]),
   supabaseUpload.array("photos", 10),
   completeWork
-);
-
-router.post(
-  "/task/:taskId/verify-completion",
-  checkForAuthenticationCookie(),
-  checkUserType(["helpseeker"]),
-  verifyCompletionOtp
 );
 
 router.patch(

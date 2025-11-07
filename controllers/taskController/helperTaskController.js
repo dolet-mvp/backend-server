@@ -5,10 +5,12 @@ const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Address = require("../../models/addressModel/addressModel");
 
+// Generate 6-digit OTP
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// Haversine formula to calculate distance between two points
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371; // Radius of Earth in kilometers
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -24,16 +26,20 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return distance;
 };
 
+// Get available tasks in queue (Helper)
 const getAvailableTasks = async (req, res) => {
   try {
     const helperId = req.user?.id; 
     console.log("Helper ID:", helperId);
-    const radius   = process.env.TASK_SEARCH_RADIUS
+   
+    
+    const radius = process.env.TASK_SEARCH_RADIUS || 50;
+
     // Check if helper is available/online
     if (helperId) {
       const helper = await Helper.findByPk(helperId);
 
-      if (!helper || !helper.isApproved || helper.verificationStatus !== 'approved') {
+      if (!helper || !helper.isAvailable || helper.verificationStatus !== 'approved') {
         return res.status(200).json({
           success: true,
           message: "You are currently offline or not approved. Please go online to see available tasks.",
@@ -49,10 +55,11 @@ const getAvailableTasks = async (req, res) => {
     let helperLat, helperLng;
     let helperAddress = null;
 
+    // Fetch helper's address from AddressModel
     if (helperId) {
       helperAddress = await Address.findOne({
         where: { helperId: helperId, userType: 'helper' },
-        attributes: ['id', 'addressLine1', 'addressLine2', 'city', 'state', 'postalCode', 'latitude', 'longitude',],
+        attributes: ['id', 'addressLine1', 'addressLine2', 'city', 'state', 'postalCode', 'latitude', 'longitude', 'type'],
         order: [['createdAt', 'DESC']], // Get most recent address
       });
 
@@ -60,20 +67,17 @@ const getAvailableTasks = async (req, res) => {
       if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
         helperLat = parseFloat(helperAddress.latitude);
         helperLng = parseFloat(helperAddress.longitude);
-      }
-    }
-
-    // If no address found or no coordinates, check query parameters
-    if (!helperLat || !helperLng) {
-      if (lat && lng) {
-        helperLat = parseFloat(lat);
-        helperLng = parseFloat(lng);
       } else {
         return res.status(400).json({
           success: false,
-          message: "Helper location is required. Either provide lat/lng in query params or add your address in your profile",
+          message: "Please add your address with location coordinates in your profile to see available tasks",
         });
       }
+    } else {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
     }
 
     const searchRadius = parseFloat(radius);
@@ -95,7 +99,6 @@ const getAvailableTasks = async (req, res) => {
 
     const whereClause = { status: "in_queue" };
     
-   
 
     // Get all tasks in queue
     const tasks = await Task.findAll({
@@ -106,7 +109,7 @@ const getAvailableTasks = async (req, res) => {
           as: "queueStatus",
         },
         {
-          model: User,
+          model: Helpseeker,
           as: "creator",
           attributes: ["id", "fullName", "profilePhoto"],
         },
@@ -114,12 +117,15 @@ const getAvailableTasks = async (req, res) => {
       order: [["createdAt", "DESC"]],
     });
 
+    // Filter tasks by location radius
     const nearbyTasks = tasks
       .filter((task) => {
+        // If task doesn't require location or has no location, include it
         if (!task.locationRequired || !task.location) {
           return true;
         }
 
+        // If task has location, check if it's within radius
         if (task.location.lat && task.location.lng) {
           const distance = calculateDistance(
             helperLat,
@@ -165,10 +171,7 @@ const getAvailableTasks = async (req, res) => {
           source: helperAddress ? 'address_model' : 'query_params'
         },
         searchRadius: searchRadius,
-        filters: {
-          category: category || 'all',
-          maxBudget: budget || 'all',
-        },
+    
         totalTasks: tasks.length,
         nearbyTasks: nearbyTasks.length,
       },
@@ -183,6 +186,7 @@ const getAvailableTasks = async (req, res) => {
   }
 };
 
+// Accept task directly (Helper) - Generates OTP and assigns task
 const acceptTask = async (req, res) => {
   try {
     const helperId = req.user.id;
@@ -334,6 +338,7 @@ const rejectTask = async (req, res) => {
       attributes: ["id", "fullName"],
     });
 
+   
     // Notify helpseeker about rejection
     await Notification.create({
       helpseekerId: task.helpseekerId,
@@ -363,6 +368,7 @@ const rejectTask = async (req, res) => {
   }
 };
 
+// Verify OTP and start task (Helper) - Step 3: Helper verifies OTP to start work
 const verifyOTPAndStartTask = async (req, res) => {
   try {
     const helperId = req.user.id;
