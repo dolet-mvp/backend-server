@@ -69,5 +69,4 @@ router.post(
   handleAdminSignup
 );
 
-
 module.exports = router;

@@ -7,21 +7,37 @@ const { initTaskScheduler } = require("./services/taskSchedulerService");
 const PORT = process.env.PORT || 8181;
 const app = express();
 
+// Allowed frontend origins
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_URL_2,
+].filter(Boolean); 
+
 app.use(
   cors({
     origin: function (origin, callback) {
+      // Allow requests with no origin (mobile apps, Postman, etc.)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // Check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // Allow localhost/local network for development
       if (
-        !origin ||
         origin.includes("localhost") ||
         origin.includes("127.0.0.1") ||
         origin.includes("192.168") ||
-        origin.includes("10.0.") ||
-        origin === process.env.FRONTEND_URL
+        origin.includes("10.0.")
       ) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS: " + origin));
+        return callback(null, true);
       }
+
+      // Reject other origins
+      callback(new Error("Not allowed by CORS: " + origin));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
