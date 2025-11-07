@@ -1,5 +1,4 @@
-const User = require("../../models/authModel/userModel");
-const HelperProfile = require("../../models/helperModel/helperModel");
+const Helper = require("../../models/authModel/helperModel");
 const { Op } = require("sequelize");
 
 /**
@@ -60,40 +59,30 @@ const getNearbyOnlineHelpers = async (req, res) => {
       });
     }
 
-    // Get all online helpers with their profiles
-    const onlineHelpers = await User.findAll({
+    // Get all online helpers
+    const onlineHelpers = await Helper.findAll({
       where: {
-        role: "helper",
-        isVerified: true,
-        isOnline: true, // Assuming you have an isOnline field
+        verificationStatus: "approved",
+        isAvailable: true,
+        isOnline: true,
         currentLatitude: { [Op.ne]: null },
         currentLongitude: { [Op.ne]: null },
       },
       attributes: [
         "id",
-        "firstName",
-        "lastName",
+        "fullName",
         "email",
         "phone",
-        "profilePicture",
+        "profilePhoto",
         "currentLatitude",
         "currentLongitude",
         "lastActiveAt",
-      ],
-      include: [
-        {
-          model: HelperProfile,
-          as: "helperProfile",
-          attributes: [
-            "skills",
-            "experience",
-            "hourlyRate",
-            "serviceRadius",
-            "availabilityStatus",
-            "rating",
-            "completedTasks",
-          ],
-        },
+        "skills",
+        "experience",
+        "hourlyRate",
+        "serviceRadius",
+        "averageRating",
+        "completedTasks",
       ],
     });
 
@@ -113,29 +102,23 @@ const getNearbyOnlineHelpers = async (req, res) => {
         if (distance <= searchRadius) {
           return {
             id: helper.id,
-            firstName: helper.firstName,
-            lastName: helper.lastName,
-            fullName: `${helper.firstName} ${helper.lastName}`,
+            fullName: helper.fullName,
             email: helper.email,
             phone: helper.phone,
-            profilePicture: helper.profilePicture,
+            profilePhoto: helper.profilePhoto,
             location: {
               latitude: helperLat,
               longitude: helperLon,
             },
             distance: parseFloat(distance.toFixed(2)), // Distance in km
             lastActiveAt: helper.lastActiveAt,
-            helperProfile: helper.helperProfile
-              ? {
-                  skills: helper.helperProfile.skills,
-                  experience: helper.helperProfile.experience,
-                  hourlyRate: helper.helperProfile.hourlyRate,
-                  serviceRadius: helper.helperProfile.serviceRadius,
-                  availabilityStatus: helper.helperProfile.availabilityStatus,
-                  rating: helper.helperProfile.rating,
-                  completedTasks: helper.helperProfile.completedTasks,
-                }
-              : null,
+            skills: helper.skills,
+            experience: helper.experience,
+            hourlyRate: helper.hourlyRate,
+            serviceRadius: helper.serviceRadius,
+            isAvailable: helper.isAvailable,
+            averageRating: helper.averageRating,
+            completedTasks: helper.completedTasks,
           };
         }
         return null;
@@ -175,14 +158,14 @@ const updateHelperLocation = async (req, res) => {
     const userId = req.user.id;
     const { latitude, longitude, isOnline } = req.body;
 
-    if (req.user.role !== "helper") {
+    if (req.user.userType !== "helper") {
       return res.status(403).json({
         success: false,
         message: "Only helpers can update their location",
       });
     }
 
-    const helper = await User.findByPk(userId);
+    const helper = await Helper.findByPk(userId);
 
     if (!helper) {
       return res.status(404).json({

@@ -8,33 +8,37 @@ const {
   verifyOTPAndStartTask,
 } = require("../../controllers/taskController/helperTaskController");
 
-const { authorizeRoles } = require("../../middleware/roleMiddleware");
+const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
 
 // Get available tasks for helper
 router.get(
   "/available",
-  authorizeRoles(["helper","helpseeker"]),
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
   getAvailableTasks
 );
 
 // Accept task directly (generates OTP and assigns to helper)
 router.post(
   "/:taskId/accept",
-  authorizeRoles(["helper","helpseeker"]),
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
   acceptTask
 );
 
 // Reject task with reason
 router.post(
   "/:taskId/reject",
-  authorizeRoles(["helper","helpseeker"]),
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
   rejectTask
 );
 
 // Verify OTP and start task
 router.post(
   "/:taskId/verify-otp",
-  authorizeRoles(["helper","helpseeker"]),
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
   verifyOTPAndStartTask
 );
 

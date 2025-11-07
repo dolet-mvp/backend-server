@@ -17,12 +17,13 @@ const TicketReply = sequelize.define(
       },
       allowNull: false,
     },
+    // Can be admin, helper, or helpseeker
     userId: {
       type: DataTypes.UUID,
-      references: {
-        model: "users",
-        key: "id",
-      },
+      allowNull: false,
+    },
+    userType: {
+      type: DataTypes.ENUM("helper", "helpseeker", "admin"),
       allowNull: false,
     },
     message: {

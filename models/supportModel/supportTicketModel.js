@@ -14,12 +14,13 @@ const SupportTicket = sequelize.define(
       unique: true,
       allowNull: false,
     },
+    // Polymorphic - can be helper or helpseeker
     userId: {
       type: DataTypes.UUID,
-      references: {
-        model: "users",
-        key: "id",
-      },
+      allowNull: false,
+    },
+    userType: {
+      type: DataTypes.ENUM("helper", "helpseeker"),
       allowNull: false,
     },
     title: {
@@ -70,7 +71,7 @@ const SupportTicket = sequelize.define(
     assignedAdminId: {
       type: DataTypes.UUID,
       references: {
-        model: "users",
+        model: "admins",
         key: "id",
       },
       allowNull: true,

@@ -1,8 +1,8 @@
 const Rating = require("../../models/ratingModel/ratingModel");
 const Task = require("../../models/taskModel/taskModel");
-const HelperProfile = require("../../models/helperModel/helperModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Notification = require("../../models/notificationModel/notificationModel");
-const User = require("../../models/authModel/userModel");
 
 // Submit rating and review after task completion
 const submitRating = async (req, res) => {
@@ -37,15 +37,21 @@ const submitRating = async (req, res) => {
 
     // Determine reviewer type and reviewee
     let revieweeId;
+    let reviewerType;
+    let revieweeType;
     let ratingType;
 
-    if (task.userId === reviewerId) {
+    if (task.helpseekerId === reviewerId) {
       // Helpseeker rating helper
       revieweeId = task.assignedHelperId;
+      reviewerType = "helpseeker";
+      revieweeType = "helper";
       ratingType = "user_to_helper";
     } else if (task.assignedHelperId === reviewerId) {
       // Helper rating helpseeker
-      revieweeId = task.userId;
+      revieweeId = task.helpseekerId;
+      reviewerType = "helper";
+      revieweeType = "helpseeker";
       ratingType = "helper_to_user";
     } else {
       return res.status(403).json({
@@ -70,6 +76,8 @@ const submitRating = async (req, res) => {
       taskId,
       reviewerId,
       revieweeId,
+      reviewerType,
+      revieweeType,
       rating,
       review,
       type: ratingType,
@@ -78,14 +86,12 @@ const submitRating = async (req, res) => {
 
     // Update helper's average rating if rating a helper
     if (ratingType === "user_to_helper") {
-      const helperProfile = await HelperProfile.findOne({
-        where: { userId: revieweeId },
-      });
+      const helper = await Helper.findByPk(revieweeId);
 
-      if (helperProfile) {
+      if (helper) {
         // Calculate new average
         const allRatings = await Rating.findAll({
-          where: { revieweeId, type: "user_to_helper" },
+          where: { revieweeId, revieweeType: "helper", type: "user_to_helper" },
         });
 
         const totalRating = allRatings.reduce(
@@ -94,20 +100,28 @@ const submitRating = async (req, res) => {
         );
         const avgRating = totalRating / allRatings.length;
 
-        helperProfile.averageRating = avgRating.toFixed(1);
-        await helperProfile.save();
+        helper.averageRating = avgRating.toFixed(1);
+        await helper.save();
       }
     }
 
     // Notify reviewee
-    await Notification.create({
-      userId: revieweeId,
+    const notificationData = {
       taskId: task.id,
       title: "New Rating Received",
       message: `You received a ${rating}-star rating for "${task.title}"`,
       type: "rating_received",
       priority: "medium",
-    });
+      userType: revieweeType,
+    };
+    
+    if (revieweeType === 'helper') {
+      notificationData.helperId = revieweeId;
+    } else {
+      notificationData.helpseekerId = revieweeId;
+    }
+    
+    await Notification.create(notificationData);
 
     res.status(201).json({
       success: true,
@@ -128,21 +142,32 @@ const submitRating = async (req, res) => {
 const getUserRatings = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { type } = req.query;
+    const { type, userType } = req.query;
 
     const whereClause = { revieweeId: userId, isVisible: true };
 
     if (type) {
       whereClause.type = type;
     }
+    
+    if (userType) {
+      whereClause.revieweeType = userType;
+    }
 
     const ratings = await Rating.findAll({
       where: whereClause,
       include: [
         {
-          model: User,
-          as: "reviewer",
+          model: Helper,
+          as: "reviewerHelper",
           attributes: ["id", "fullName", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "reviewerHelpseeker",
+          attributes: ["id", "fullName", "profilePhoto"],
+          required: false,
         },
         {
           model: Task,
@@ -201,14 +226,28 @@ const getTaskRating = async (req, res) => {
       where: { taskId },
       include: [
         {
-          model: User,
-          as: "reviewer",
+          model: Helper,
+          as: "reviewerHelper",
           attributes: ["id", "fullName", "profilePhoto"],
+          required: false,
         },
         {
-          model: User,
-          as: "reviewee",
+          model: Helpseeker,
+          as: "reviewerHelpseeker",
           attributes: ["id", "fullName", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helper,
+          as: "revieweeHelper",
+          attributes: ["id", "fullName", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "revieweeHelpseeker",
+          attributes: ["id", "fullName", "profilePhoto"],
+          required: false,
         },
       ],
     });
@@ -231,6 +270,7 @@ const getTaskRating = async (req, res) => {
 const getMyRatings = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType;
     const { type } = req.query; // 'given' or 'received'
 
     let ratingsGiven = [];
@@ -238,12 +278,19 @@ const getMyRatings = async (req, res) => {
 
     if (!type || type === "given") {
       ratingsGiven = await Rating.findAll({
-        where: { reviewerId: userId },
+        where: { reviewerId: userId, reviewerType: userType },
         include: [
           {
-            model: User,
-            as: "reviewee",
+            model: Helper,
+            as: "revieweeHelper",
             attributes: ["id", "fullName", "profilePhoto"],
+            required: false,
+          },
+          {
+            model: Helpseeker,
+            as: "revieweeHelpseeker",
+            attributes: ["id", "fullName", "profilePhoto"],
+            required: false,
           },
           {
             model: Task,
@@ -257,12 +304,19 @@ const getMyRatings = async (req, res) => {
 
     if (!type || type === "received") {
       ratingsReceived = await Rating.findAll({
-        where: { revieweeId: userId, isVisible: true },
+        where: { revieweeId: userId, revieweeType: userType, isVisible: true },
         include: [
           {
-            model: User,
-            as: "reviewer",
+            model: Helper,
+            as: "reviewerHelper",
             attributes: ["id", "fullName", "profilePhoto"],
+            required: false,
+          },
+          {
+            model: Helpseeker,
+            as: "reviewerHelpseeker",
+            attributes: ["id", "fullName", "profilePhoto"],
+            required: false,
           },
           {
             model: Task,

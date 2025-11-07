@@ -19,18 +19,18 @@ const Message = sequelize.define(
     },
     senderId: {
       type: DataTypes.UUID,
-      references: {
-        model: "users",
-        key: "id",
-      },
+      allowNull: false,
+    },
+    senderType: {
+      type: DataTypes.ENUM("helper", "helpseeker"),
       allowNull: false,
     },
     receiverId: {
       type: DataTypes.UUID,
-      references: {
-        model: "users",
-        key: "id",
-      },
+      allowNull: false,
+    },
+    receiverType: {
+      type: DataTypes.ENUM("helper", "helpseeker"),
       allowNull: false,
     },
     message: {

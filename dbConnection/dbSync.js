@@ -1,13 +1,16 @@
 const {sequelize} = require("../dbConnection/dbConfig");
-const User = require("../models/authModel/userModel");
-
 
 const initDB = (callback) => {
   sequelize.authenticate()
     .then(() => {
       console.log('Connected to Supabase PostgreSQL');
       
-      // Load all models first
+      // Load all auth models first
+      require('../models/authModel/helperModel');
+      require('../models/authModel/helpseekerModel');
+      require('../models/authModel/adminModel');
+      
+      // Load all other models
       require('../models/addressModel/addressModel');
       require('../models/taskModel/taskModel');
       require('../models/bidModel/bidModel');
@@ -18,17 +21,16 @@ const initDB = (callback) => {
       require('../models/trackingModel/trackingModel');
       require('../models/messageModel/messageModel');
       require('../models/messageModel/taskMessageModel');
-      require('../models/helperModel/helperModel');
       require('../models/supportModel/supportTicketModel');
       require('../models/supportModel/ticketReplyModel');
       
       // Load associations after all models are loaded
-      require('../models/associationModel/association');
+      require('../models/modelAssociation');
       
       return sequelize.sync(); // Creates tables if not exist
     })
     .then(() => {
-      console.log('All models synced');
+      console.log('All models synced successfully');
       callback(); 
     })
     .catch((error) => {
@@ -36,4 +38,5 @@ const initDB = (callback) => {
       process.exit(1);
     });
 };
+
 module.exports = initDB;

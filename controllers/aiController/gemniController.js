@@ -599,7 +599,7 @@ async function enrichLocationsInBackground(taskId, steps) {
         enrichedSteps: enrichedSteps,
         completedAt: new Date()
       });
-      console.log(`✅ [BACKGROUND] Enrichment completed for task ${taskId}`);
+      console.log(` [BACKGROUND] Enrichment completed for task ${taskId}`);
     }
 
   } catch (error) {
@@ -617,10 +617,7 @@ async function enrichLocationsInBackground(taskId, steps) {
 }
 
 
-/**
- * Fetch enriched task data by taskId
- * This endpoint is called by frontend after receiving the initial taskId
- */
+
 const getEnrichedTask = async (req, res) => {
   console.log('\n📥 [FETCH] Getting enriched task data');
   

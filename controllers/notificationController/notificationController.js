@@ -5,9 +5,17 @@ const Task = require("../../models/taskModel/taskModel");
 const getNotifications = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType;
     const { isRead, type, limit = 50 } = req.query;
 
-    let whereClause = { userId };
+    let whereClause = { userType };
+    
+    // Add polymorphic user ID based on user type
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    }
 
     if (isRead !== undefined) {
       whereClause.isRead = isRead === "true";
@@ -32,8 +40,15 @@ const getNotifications = async (req, res) => {
     });
 
     // Count unread notifications
+    const unreadCountWhere = { userType, isRead: false };
+    if (userType === 'helper') {
+      unreadCountWhere.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      unreadCountWhere.helpseekerId = userId;
+    }
+    
     const unreadCount = await Notification.count({
-      where: { userId, isRead: false },
+      where: unreadCountWhere,
     });
 
     res.status(200).json({
@@ -57,10 +72,18 @@ const getNotifications = async (req, res) => {
 const markAsRead = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType;
     const { notificationId } = req.params;
 
+    const whereClause = { id: notificationId, userType };
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    }
+
     const notification = await Notification.findOne({
-      where: { id: notificationId, userId },
+      where: whereClause,
     });
 
     if (!notification) {
@@ -92,10 +115,18 @@ const markAsRead = async (req, res) => {
 const markAllAsRead = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType;
+
+    const whereClause = { userType, isRead: false };
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    }
 
     await Notification.update(
       { isRead: true },
-      { where: { userId, isRead: false } }
+      { where: whereClause }
     );
 
     res.status(200).json({
@@ -116,10 +147,18 @@ const markAllAsRead = async (req, res) => {
 const deleteNotification = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType;
     const { notificationId } = req.params;
 
+    const whereClause = { id: notificationId, userType };
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    }
+
     const notification = await Notification.findOne({
-      where: { id: notificationId, userId },
+      where: whereClause,
     });
 
     if (!notification) {
@@ -149,9 +188,17 @@ const deleteNotification = async (req, res) => {
 const clearReadNotifications = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType;
+
+    const whereClause = { userType, isRead: true };
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    }
 
     await Notification.destroy({
-      where: { userId, isRead: true },
+      where: whereClause,
     });
 
     res.status(200).json({
@@ -172,9 +219,17 @@ const clearReadNotifications = async (req, res) => {
 const getUnreadCount = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType;
+
+    const whereClause = { userType, isRead: false };
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    }
 
     const unreadCount = await Notification.count({
-      where: { userId, isRead: false },
+      where: whereClause,
     });
 
     res.status(200).json({

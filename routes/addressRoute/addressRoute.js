@@ -9,13 +9,55 @@ const {
   setDefaultAddress,
   getDefaultAddress
 } = require("../../controllers/addressController/address");
+const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
 
-router.post("/address/add",  createAddress);
-router.get("/address", getUserAddresses);
-router.get("/address/default", getDefaultAddress);
-router.get("/address/:addressId",  getAddressById);
-router.put("/address/:addressId", updateAddress);
-router.delete("/address/:addressId",  deleteAddress);
-router.patch("/address/:addressId/default",  setDefaultAddress);
+router.post(
+  "/address/add",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  createAddress
+);
+
+router.get(
+  "/address",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  getUserAddresses
+);
+
+router.get(
+  "/address/default",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  getDefaultAddress
+);
+
+router.get(
+  "/address/:addressId",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  getAddressById
+);
+
+router.put(
+  "/address/:addressId",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  updateAddress
+);
+
+router.delete(
+  "/address/:addressId",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  deleteAddress
+);
+
+router.patch(
+  "/address/:addressId/default",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  setDefaultAddress
+);
 
 module.exports = router;

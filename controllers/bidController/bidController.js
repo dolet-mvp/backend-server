@@ -2,7 +2,8 @@ const Bid = require("../../models/bidModel/bidModel");
 const Task = require("../../models/taskModel/taskModel");
 const TaskQueue = require("../../models/queueModel/queueModel");
 const Notification = require("../../models/notificationModel/notificationModel");
-const User = require("../../models/authModel/userModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 
 // Helper function to parse date from multiple formats
 const parseDate = (dateString) => {
@@ -106,7 +107,8 @@ const placeBid = async (req, res) => {
 
     // Notify task creator (helpseeker)
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "New Bid Received",
       message: `You received a bid of $${bidAmount} for your task "${task.title}"`,
@@ -133,10 +135,10 @@ const placeBid = async (req, res) => {
 const getTaskBids = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
 
     // Verify task ownership
-    const task = await Task.findOne({ where: { id: taskId, userId } });
+    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
 
     if (!task) {
       return res.status(404).json({
@@ -149,7 +151,7 @@ const getTaskBids = async (req, res) => {
       where: { taskId },
       include: [
         {
-          model: User,
+          model: Helper,
           as: "helper",
           attributes: ["id", "fullName", "profilePhoto", "phone"],
         },
@@ -190,7 +192,7 @@ const getMyBids = async (req, res) => {
           as: "task",
           include: [
             {
-              model: User,
+              model: Helpseeker,
               as: "creator",
               attributes: ["id", "fullName", "profilePhoto"],
             },
@@ -218,7 +220,7 @@ const getMyBids = async (req, res) => {
 const acceptBid = async (req, res) => {
   try {
     const { bidId } = req.params;
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
 
     const bid = await Bid.findByPk(bidId, {
       include: [
@@ -227,14 +229,14 @@ const acceptBid = async (req, res) => {
           as: "task",
           include: [
             {
-              model: User,
+              model: Helpseeker,
               as: "creator",
               attributes: ["id", "fullName"],
             },
           ],
         },
         {
-          model: User,
+          model: Helper,
           as: "helper",
           attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
         },
@@ -249,7 +251,7 @@ const acceptBid = async (req, res) => {
     }
 
     // Verify task ownership
-    if (bid.task.userId !== userId) {
+    if (bid.task.helpseekerId !== helpseekerId) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized to accept this bid",
@@ -296,7 +298,8 @@ const acceptBid = async (req, res) => {
 
     // Notify helper (accepted + OTP instruction)
     await Notification.create({
-      userId: bid.helperId,
+      helperId: bid.helperId,
+      userType: 'helper',
       taskId: bid.taskId,
       title: "Bid Accepted - Task Assigned! 🎉",
       message: `Great news! Your bid of ₹${bid.bidAmount} for "${bid.task.title}" has been accepted. Ask ${bid.task.creator.fullName} for the 6-digit OTP to start work.`,
@@ -306,7 +309,8 @@ const acceptBid = async (req, res) => {
 
     // Notify helpseeker with OTP
     await Notification.create({
-      userId: userId,
+      helpseekerId: helpseekerId,
+      userType: 'helpseeker',
       taskId: bid.taskId,
       title: "Bid Accepted",
       message: `You accepted ${bid.helper.fullName}'s bid of ₹${bid.bidAmount} for "${bid.task.title}". Your verification OTP is: ${otp}. Share this OTP with the helper when work begins.`,
@@ -323,7 +327,8 @@ const acceptBid = async (req, res) => {
     });
 
     const rejectedNotifications = rejectedBids.map((rejectedBid) => ({
-      userId: rejectedBid.helperId,
+      helperId: rejectedBid.helperId,
+      userType: 'helper',
       taskId: bid.taskId,
       title: "Bid Not Selected",
       message: `The task "${bid.task.title}" was assigned to another helper`,
@@ -370,7 +375,7 @@ const acceptBid = async (req, res) => {
 const rejectBid = async (req, res) => {
   try {
     const { bidId } = req.params;
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
 
     const bid = await Bid.findByPk(bidId, {
       include: [
@@ -389,7 +394,7 @@ const rejectBid = async (req, res) => {
     }
 
     // Verify task ownership
-    if (bid.task.userId !== userId) {
+    if (bid.task.helpseekerId !== helpseekerId) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized to reject this bid",
@@ -408,7 +413,8 @@ const rejectBid = async (req, res) => {
 
     // Notify helper
     await Notification.create({
-      userId: bid.helperId,
+      helperId: bid.helperId,
+      userType: 'helper',
       taskId: bid.taskId,
       title: "Bid Rejected",
       message: `Your bid for "${bid.task.title}" was not selected`,
@@ -461,7 +467,8 @@ const withdrawBid = async (req, res) => {
 
     // Notify task creator
     await Notification.create({
-      userId: bid.task.userId,
+      helpseekerId: bid.task.helpseekerId,
+      userType: 'helpseeker',
       taskId: bid.taskId,
       title: "Bid Withdrawn",
       message: `A helper withdrew their bid for "${bid.task.title}"`,

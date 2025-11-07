@@ -1,26 +1,24 @@
 const Task = require("../../models/taskModel/taskModel");
 const TaskQueue = require("../../models/queueModel/queueModel");
 const Notification = require("../../models/notificationModel/notificationModel");
-const User = require("../../models/authModel/userModel");
-const HelperProfile = require("../../models/helperModel/helperModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Address = require("../../models/addressModel/addressModel");
 
-// Generate 6-digit OTP
+
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Create a new task (Helpseeker)
 const createTask = async (req, res) => {
   try {
-    const userId = req.user.id;
-    
-    // Verify user exists in database
-    const userExists = await User.findByPk(userId);
-    if (!userExists) {
+    const helpseekerId = req.user.id;
+    // Verify helpseeker exists in database
+    const helpseeker = await Helpseeker.findByPk(helpseekerId);
+    if (!helpseeker) {
       return res.status(404).json({
         success: false,
-        message: "User not found. Please log in again.",
+        message: "Helpseeker not found. Please log in again.",
       });
     }
     
@@ -28,14 +26,11 @@ const createTask = async (req, res) => {
       title,
       description,
       category,
-      skillsRequired,
       budget,
       estimatedDuration,
-      dueDate,
       priority,
       locationRequired,
       location,
-      requirements,
       allowDirectAcceptance,
       steps
     } = req.body;
@@ -49,15 +44,6 @@ const createTask = async (req, res) => {
           success: false,
           message: "Invalid location format. Must be a valid JSON object",
         });
-      }
-    }
-
-    // Parse skillsRequired if it comes as string from form-data
-    if (skillsRequired && typeof skillsRequired === 'string') {
-      try {
-        skillsRequired = JSON.parse(skillsRequired);
-      } catch (error) {
-        skillsRequired = [];
       }
     }
 
@@ -136,78 +122,27 @@ const createTask = async (req, res) => {
       });
     }
 
-    // Parse and validate dueDate if provided
-    let parsedDueDate = null;
-    if (dueDate) {
-      // Handle different date formats: DD-MM-YYYY, YYYY-MM-DD, ISO string
-      const dateStr = dueDate.trim();
-      
-      // Check if it's DD-MM-YYYY format
-      if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) {
-        const [day, month, year] = dateStr.split('-');
-        parsedDueDate = new Date(`${year}-${month}-${day}`);
-      } 
-      // Check if it's YYYY-MM-DD format
-      else if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-        parsedDueDate = new Date(dateStr);
-      }
-      // Try parsing as ISO string or other formats
-      else {
-        parsedDueDate = new Date(dateStr);
-      }
-
-      // Validate the parsed date
-      if (isNaN(parsedDueDate.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid due date format. Use DD-MM-YYYY or YYYY-MM-DD",
-        });
-      }
-
-      // Get current date and time
-      const now = new Date();
-      
-      // Set parsedDueDate to end of day if only date is provided (no time)
-      // This allows tasks due "today" to be valid
-      const dateOnly = /^\d{2}-\d{2}-\d{4}$/.test(dateStr) || /^\d{4}-\d{2}-\d{2}$/.test(dateStr);
-      if (dateOnly) {
-        // Set to end of the day (23:59:59)
-        parsedDueDate.setHours(23, 59, 59, 999);
-      }
-
-      // Check if date/time is in the past (before current moment)
-      if (parsedDueDate < now) {
-        return res.status(400).json({
-          success: false,
-          message: "Due date cannot be in the past",
-        });
-      }
-    }
-
     // Handle uploaded attachments
     const attachments = req.fileUrls || [];
 
     const task = await Task.create({
-      userId,
+      helpseekerId,
       title,
       description,
       category,
-      skillsRequired: skillsRequired || [],
       budget: taskBudget,
       estimatedDuration,
-      dueDate: parsedDueDate,
       priority: priority || "medium",
       status: "draft",
       locationRequired: locationRequired || false,
       location: locationRequired ? location : null,
       attachments,
-      requirements,
       allowDirectAcceptance: allowDirectAcceptance || true,
       steps: steps || []
     });
 
-    console.log("✅ Task created successfully! Task ID:", task.id);
-    console.log("👤 User ID:", userId);
+    console.log(" Task created successfully! Task ID:", task.id);
+    console.log(" Helpseeker ID:", helpseekerId);
 
     res.status(201).json({
       success: true,
@@ -224,13 +159,12 @@ const createTask = async (req, res) => {
   }
 };
 
-// Publish task to queue (Helpseeker)
 const publishTask = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
 
-    const task = await Task.findOne({ where: { id: taskId, userId } });
+    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
 
     if (!task) {
       return res.status(404).json({
@@ -259,12 +193,13 @@ const publishTask = async (req, res) => {
     });
 
     // Notify available helpers
-    const helpers = await User.findAll({
-      where: { role: "helper", isVerified: true },
+    const helpers = await Helper.findAll({
+      where: { verificationStatus: "approved", isApproved: true },
     });
 
     const notifications = helpers.map((helper) => ({
-      userId: helper.id,
+      helperId: helper.id,
+      userType: 'helper',
       taskId: task.id,
       title: "New Task Available",
       message: `New task: ${task.title}`,
@@ -289,12 +224,11 @@ const publishTask = async (req, res) => {
   }
 };
 
-// Schedule task to be published at a specific date and time
 const scheduleTaskPublish = async (req, res) => {
   try {
     const { taskId } = req.params;
     const { scheduledPublishAt } = req.body;
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
 
     if (!scheduledPublishAt) {
       return res.status(400).json({
@@ -303,7 +237,7 @@ const scheduleTaskPublish = async (req, res) => {
       });
     }
 
-    const task = await Task.findOne({ where: { id: taskId, userId } });
+    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
 
     if (!task) {
       return res.status(404).json({
@@ -358,13 +292,12 @@ const scheduleTaskPublish = async (req, res) => {
   }
 };
 
-// Cancel scheduled publish
 const cancelScheduledPublish = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
 
-    const task = await Task.findOne({ where: { id: taskId, userId } });
+    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
 
     if (!task) {
       return res.status(404).json({
@@ -407,17 +340,16 @@ const cancelScheduledPublish = async (req, res) => {
   }
 };
 
-// Get all tasks created by helpseeker
 const getMyTasks = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
 
     const { status } = req.query;
 
-    console.log("📋 Getting tasks for userId:", userId);
-    console.log("🔍 Status filter:", status || "all");
+    console.log(" Getting tasks for helpseekerId:", helpseekerId);
+    console.log(" Status filter:", status || "all");
 
-    const whereClause = { userId };
+    const whereClause = { helpseekerId };
     if (status) {
       whereClause.status = status;
     }
@@ -427,14 +359,14 @@ const getMyTasks = async (req, res) => {
       order: [["createdAt", "DESC"]],
       include: [
         {
-          model: User,
+          model: Helper,
           as: "assignedHelper",
           attributes: ["id", "fullName", "profilePhoto", "phone"],
         },
       ],
     });
 
-    console.log(`✅ Found ${tasks.length} tasks for user`);
+    console.log(` Found ${tasks.length} tasks for user`);
 
     res.status(200).json({
       success: true,
@@ -450,20 +382,19 @@ const getMyTasks = async (req, res) => {
   }
 };
 
-// Get task by ID with full details (Helpseeker)
 const getTaskById = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
     const { taskId } = req.params;
 
     const task = await Task.findOne({
       where: { 
         id: taskId, 
-        userId 
+        helpseekerId 
       },
       include: [
         {
-          model: User,
+          model: Helper,
           as: "assignedHelper",
           attributes: ["id", "fullName", "profilePhoto", "phone", "email"],
         },
@@ -491,7 +422,6 @@ const getTaskById = async (req, res) => {
   }
 };
 
-// Helper function to calculate distance between two coordinates (Haversine formula)
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371; // Earth's radius in kilometers
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -510,15 +440,16 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 // Get nearby helpers within radius (Helpseeker)
 const getNearbyHelpers = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { radius = 10, skill } = req.query;
+    const helpseekerId = req.user.id;
+    const radius = process.env.TASK_SEARCH_RADIUS;
 
-    console.log("🗺️ Searching for helpers near user:", userId);
+    console.log("Searching for helpers near helpseeker:", helpseekerId);
 
-    // Get user's address with coordinates
+    // Get helpseeker's address with coordinates
     const userAddress = await Address.findOne({
       where: {
-        userId: userId,
+        helpseekerId: helpseekerId,
+        userType: 'helpseeker',
         latitude: {
           [require("sequelize").Op.ne]: null,
         },
@@ -559,24 +490,24 @@ const getNearbyHelpers = async (req, res) => {
       });
     }
 
-    console.log("🔍 Search filters:");
+    console.log(" Search filters:");
     console.log(`   Radius: ${searchRadius} km`);
-    console.log(`   Skill filter: ${skill || 'none (all skills)'}`);
-    console.log("\n🔎 Step 1: Checking total helpers in database...");
+    console.log("\n Step 1: Checking total helpers in database...");
 
     // First, check how many helpers exist at all
-    const totalHelpers = await User.count({ where: { role: "helper" } });
-    console.log(`   Total users with role='helper': ${totalHelpers}`);
+    const totalHelpers = await Helper.count({ where: { verificationStatus: "approved" } });
+    console.log(`   Total approved helpers: ${totalHelpers}`);
 
     // Check how many have addresses
-    const helpersWithAddresses = await User.count({
-      where: { role: "helper" },
+    const helpersWithAddresses = await Helper.count({
+      where: { verificationStatus: "approved" },
       include: [
         {
           model: Address,
           as: "addresses",
           required: true,
           where: {
+            userType: 'helper',
             latitude: { [require("sequelize").Op.ne]: null },
             longitude: { [require("sequelize").Op.ne]: null },
           },
@@ -585,32 +516,26 @@ const getNearbyHelpers = async (req, res) => {
     });
     console.log(`   Helpers with valid addresses: ${helpersWithAddresses}`);
 
-    // Check how many have profiles
-    const helpersWithProfiles = await User.count({
-      where: { role: "helper" },
-      include: [
-        {
-          model: HelperProfile,
-          as: "helperProfile",
-          required: true,
-        },
-      ],
-    });
+    // Note: Helper profiles are now integrated into Helper model
+    const helpersWithProfiles = totalHelpers;
+    console.log(`   Helpers with profiles: ${helpersWithProfiles} (all approved helpers have profiles)`);
     console.log(`   Helpers with profiles: ${helpersWithProfiles}`);
 
-    console.log("\n🔎 Step 2: Querying helpers with BOTH address AND profile...");
+    console.log("\n Step 2: Querying helpers with BOTH address AND profile...");
 
-    // Get all helpers with their addresses and profiles
-    const helpers = await User.findAll({
+    // Get all helpers with their addresses (profiles are now part of Helper model)
+    const helpers = await Helper.findAll({
       where: {
-        role: "helper",
+        verificationStatus: "approved",
+        isApproved: true,
       },
-      attributes: ["id", "fullName", "profilePhoto", "phone", "email", "role"],
+      attributes: ["id", "fullName"],
       include: [
         {
           model: Address,
           as: "addresses",
           where: {
+            userType: 'helper',
             latitude: {
               [require("sequelize").Op.ne]: null,
             },
@@ -621,33 +546,13 @@ const getNearbyHelpers = async (req, res) => {
           required: true,
           attributes: ["latitude", "longitude", "city", "state", "type", "isDefault"],
         },
-        {
-          model: HelperProfile,
-          as: "helperProfile",
-          required: true,
-          where: skill
-            ? {
-                skills: {
-                  [require("sequelize").Op.contains]: [skill],
-                },
-              }
-            : {},
-          attributes: [
-            "skills",
-            "hourlyRate",
-            "serviceRadius",
-            "isAvailable",
-            "completedTasks",
-            "averageRating",
-          ],
-        },
       ],
     });
 
     console.log(`📍 Found ${helpers.length} helpers with BOTH address AND profile`);
     
     if (helpers.length === 0 && totalHelpers > 0) {
-      console.log("\n❌ ISSUE IDENTIFIED:");
+      console.log("\n ISSUE IDENTIFIED:");
       if (helpersWithAddresses === 0) {
         console.log("   Problem: Helpers exist but NONE have addresses with coordinates");
         console.log("   Solution: Add addresses to helper users");
@@ -662,14 +567,11 @@ const getNearbyHelpers = async (req, res) => {
 
     // Debug: Log all helpers found
     if (helpers.length === 0) {
-      console.log("⚠️ No helpers found in database with addresses and profiles");
-      console.log("💡 Possible reasons:");
+      console.log(" No helpers found in database with addresses and profiles");
+      console.log(" Possible reasons:");
       console.log("   1. No users with role='helper'");
       console.log("   2. Helpers don't have addresses with lat/lng");
       console.log("   3. Helpers don't have helper profiles");
-      if (skill) {
-        console.log(`   4. No helpers have the skill: '${skill}'`);
-      }
     } else {
       console.log(`🔍 Processing ${helpers.length} helpers...`);
     }
@@ -703,47 +605,39 @@ const getNearbyHelpers = async (req, res) => {
 
       if (isNaN(helperLat) || isNaN(helperLng)) {
         debugInfo.skippedInvalidCoords++;
-        console.log(`⚠️ Helper ${helper.fullName} (${helper.id}): Invalid coordinates (${address.latitude}, ${address.longitude})`);
+        console.log(` Helper ${helper.fullName} (${helper.id}): Invalid coordinates (${address.latitude}, ${address.longitude})`);
         continue;
       }
 
       // Calculate distance
       const distance = calculateDistance(lat, lng, helperLat, helperLng);
       
-      console.log(`📏 Helper ${helper.fullName}:`);
+      console.log(` Helper ${helper.fullName}:`);
       console.log(`   Location: (${helperLat}, ${helperLng}) - ${address.city}`);
       console.log(`   Distance: ${distance.toFixed(2)} km`);
-      console.log(`   Available: ${helper.helperProfile.isAvailable}`);
-      console.log(`   Skills: ${JSON.stringify(helper.helperProfile.skills || [])}`);
+      console.log(`   Available: ${helper.isApproved}`);
+      console.log(`   Skills: ${JSON.stringify(helper.skills || [])}`);
 
       // Check if within radius
       if (distance > searchRadius) {
         debugInfo.skippedOutOfRadius++;
-        console.log(`   ❌ Outside radius (${distance.toFixed(2)} km > ${searchRadius} km)`);
+        console.log(`    Outside radius (${distance.toFixed(2)} km > ${searchRadius} km)`);
         continue;
       }
 
-      // Check if available
-      if (!helper.helperProfile.isAvailable) {
+      // Check if available (already filtered in query, but double-check)
+      if (!helper.isApproved) {
         debugInfo.skippedNotAvailable++;
-        console.log(`   ❌ Helper not available`);
+        console.log(`    Helper not available`);
         continue;
       }
 
       debugInfo.withinRadius++;
-      console.log(`   ✅ Added to results!`);
+      console.log(`    Added to results!`);
 
       nearbyHelpers.push({
         id: helper.id,
         fullName: helper.fullName,
-        profilePhoto: helper.profilePhoto,
-        phone: helper.phone,
-        email: helper.email,
-        skills: helper.helperProfile.skills || [],
-        hourlyRate: parseFloat(helper.helperProfile.hourlyRate) || 0,
-        rating: parseFloat(helper.helperProfile.averageRating) || 0,
-        completedTasks: helper.helperProfile.completedTasks || 0,
-        serviceRadius: helper.helperProfile.serviceRadius || 10,
         location: {
           latitude: helperLat,
           longitude: helperLng,
@@ -757,15 +651,15 @@ const getNearbyHelpers = async (req, res) => {
     // Sort by distance (nearest first)
     nearbyHelpers.sort((a, b) => a.distance - b.distance);
 
-    console.log("\n📊 SEARCH SUMMARY:");
+    console.log("\n SEARCH SUMMARY:");
     console.log(`   Total helpers in DB: ${debugInfo.totalHelpers}`);
     console.log(`   Processed: ${debugInfo.processedHelpers}`);
     console.log(`   Skipped (no address): ${debugInfo.skippedNoAddress}`);
     console.log(`   Skipped (invalid coords): ${debugInfo.skippedInvalidCoords}`);
     console.log(`   Skipped (out of radius): ${debugInfo.skippedOutOfRadius}`);
     console.log(`   Skipped (not available): ${debugInfo.skippedNotAvailable}`);
-    console.log(`   ✅ Within radius & available: ${debugInfo.withinRadius}`);
-    console.log(`\n✅ Returning ${nearbyHelpers.length} helpers within ${searchRadius}km`);
+    console.log(`    Within radius & available: ${debugInfo.withinRadius}`);
+    console.log(`\n Returning ${nearbyHelpers.length} helpers within ${searchRadius}km`);
 
     res.status(200).json({
       success: true,
@@ -789,14 +683,13 @@ const getNearbyHelpers = async (req, res) => {
   }
 };
 
-// Update task (Helpseeker - only draft tasks)
 const updateTask = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
     let updateData = { ...req.body };
 
-    const task = await Task.findOne({ where: { id: taskId, userId } });
+    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
 
     if (!task) {
       return res.status(404).json({
@@ -824,14 +717,6 @@ const updateTask = async (req, res) => {
       }
     }
 
-    // Parse skillsRequired if it comes as string from form-data
-    if (updateData.skillsRequired && typeof updateData.skillsRequired === 'string') {
-      try {
-        updateData.skillsRequired = JSON.parse(updateData.skillsRequired);
-      } catch (error) {
-        updateData.skillsRequired = [];
-      }
-    }
 
     // Parse steps if it comes as string from form-data
     if (updateData.steps && typeof updateData.steps === 'string') {
@@ -918,53 +803,6 @@ const updateTask = async (req, res) => {
       updateData.budget = taskBudget;
     }
 
-    // Parse and validate dueDate if provided
-    if (updateData.dueDate) {
-      const dateStr = updateData.dueDate.trim();
-      let parsedDueDate = null;
-      
-      // Check if it's DD-MM-YYYY format
-      if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) {
-        const [day, month, year] = dateStr.split('-');
-        parsedDueDate = new Date(`${year}-${month}-${day}`);
-      } 
-      // Check if it's YYYY-MM-DD format
-      else if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-        parsedDueDate = new Date(dateStr);
-      }
-      // Try parsing as ISO string or other formats
-      else {
-        parsedDueDate = new Date(dateStr);
-      }
-
-      // Validate the parsed date
-      if (isNaN(parsedDueDate.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid due date format. Use DD-MM-YYYY or YYYY-MM-DD",
-        });
-      }
-
-      // Get current date and time
-      const now = new Date();
-      
-      // Set parsedDueDate to end of day if only date is provided (no time)
-      const dateOnly = /^\d{2}-\d{2}-\d{4}$/.test(dateStr) || /^\d{4}-\d{2}-\d{2}$/.test(dateStr);
-      if (dateOnly) {
-        parsedDueDate.setHours(23, 59, 59, 999);
-      }
-
-      // Check if date/time is in the past
-      if (parsedDueDate < now) {
-        return res.status(400).json({
-          success: false,
-          message: "Due date cannot be in the past",
-        });
-      }
-
-      updateData.dueDate = parsedDueDate;
-    }
-
     // Handle new attachments from upload
     if (req.fileUrls && req.fileUrls.length > 0) {
       // Merge existing attachments with new ones
@@ -993,9 +831,9 @@ const updateTask = async (req, res) => {
 const cancelTask = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
 
-    const task = await Task.findOne({ where: { id: taskId, userId } });
+    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
 
     if (!task) {
       return res.status(404).json({
@@ -1014,7 +852,8 @@ const cancelTask = async (req, res) => {
     // If task is assigned, notify helper
     if (task.assignedHelperId) {
       await Notification.create({
-        userId: task.assignedHelperId,
+        helperId: task.assignedHelperId,
+        userType: 'helper',
         taskId: task.id,
         title: "Task Cancelled",
         message: `Task "${task.title}" has been cancelled by the helpseeker`,
@@ -1048,7 +887,7 @@ const cancelTask = async (req, res) => {
 const increaseReward = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
     const { additionalAmount } = req.body;
 
     if (!additionalAmount || additionalAmount <= 0) {
@@ -1058,7 +897,7 @@ const increaseReward = async (req, res) => {
       });
     }
 
-    const task = await Task.findOne({ where: { id: taskId, userId } });
+    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
 
     if (!task) {
       return res.status(404).json({
@@ -1079,12 +918,13 @@ const increaseReward = async (req, res) => {
     await task.save();
 
     // Notify helpers about increased reward
-    const helpers = await User.findAll({
-      where: { role: "helper", isVerified: true },
+    const helpers = await Helper.findAll({
+      where: { verificationStatus: "approved", isApproved: true },
     });
 
     const notifications = helpers.map((helper) => ({
-      userId: helper.id,
+      helperId: helper.id,
+      userType: 'helper',
       taskId: task.id,
       title: "Task Reward Increased",
       message: `Reward increased from $${oldBudget} to $${task.budget} for "${task.title}"`,
@@ -1109,186 +949,15 @@ const increaseReward = async (req, res) => {
   }
 };
 
-// Approve helper request and assign task (Helpseeker) - Step 2: Helpseeker approves helper
-const approveHelperRequest = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { taskId } = req.params;
 
-    const task = await Task.findOne({ 
-      where: { id: taskId, userId },
-      include: [
-        {
-          model: User,
-          as: "creator",
-          attributes: ["id", "fullName"],
-        },
-      ],
-    });
-
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        message: "Task not found or you are not authorized",
-      });
-    }
-
-    if (!task.pendingHelperId) {
-      return res.status(400).json({
-        success: false,
-        message: "No pending helper request for this task",
-      });
-    }
-
-    if (task.status !== "in_queue") {
-      return res.status(400).json({
-        success: false,
-        message: "Task is not available for assignment",
-      });
-    }
-
-    // Get helper details
-    const helper = await User.findByPk(task.pendingHelperId, {
-      attributes: ["id", "fullName", "email", "phone"],
-    });
-
-    if (!helper) {
-      return res.status(404).json({
-        success: false,
-        message: "Helper not found",
-      });
-    }
-
-    // Generate OTP for task verification
-    const otp = generateOTP();
-
-    // Assign task to helper
-    task.status = "assigned";
-    task.assignedHelperId = task.pendingHelperId;
-    task.acceptedAt = new Date();
-    task.verificationOtp = otp;
-    task.otpGeneratedAt = new Date();
-    task.isOtpVerified = false;
-    task.pendingHelperId = null; // Clear pending helper
-    await task.save();
-
-    // Remove from queue
-    await TaskQueue.destroy({ where: { taskId: task.id } });
-
-    // Notify helper (approved + OTP instruction)
-    await Notification.create({
-      userId: helper.id,
-      taskId: task.id,
-      title: "Request Approved - Task Assigned!",
-      message: `Great news! ${task.creator.fullName} has approved your request for "${task.title}". Ask the helpseeker for the 6-digit OTP to start work.`,
-      type: "request_approved",
-      priority: "high",
-    });
-
-    // Notify helpseeker with OTP
-    await Notification.create({
-      userId: userId,
-      taskId: task.id,
-      title: "Helper Approved",
-      message: `You approved ${helper.fullName} for "${task.title}". Your verification OTP is: ${otp}. Share this OTP with the helper when work begins.`,
-      type: "helper_approved",
-      priority: "high",
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Helper approved and task assigned successfully",
-      data: {
-        task: {
-          id: task.id,
-          title: task.title,
-          status: task.status,
-          assignedHelperId: task.assignedHelperId,
-          acceptedAt: task.acceptedAt,
-        },
-        helper: {
-          id: helper.id,
-          fullName: helper.fullName,
-          email: helper.email,
-          phone: helper.phone,
-        },
-        otp: otp,
-        otpGeneratedAt: task.otpGeneratedAt,
-        message: "Share this OTP with the helper when work begins. OTP is valid for 24 hours.",
-      },
-    });
-  } catch (error) {
-    console.error("Approve helper request error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to approve helper request",
-      error: error.message,
-    });
-  }
-};
-
-// Reject helper request (Helpseeker)
-const rejectHelperRequest = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { taskId } = req.params;
-    const { reason } = req.body; // Optional rejection reason
-
-    const task = await Task.findOne({ where: { id: taskId, userId } });
-
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        message: "Task not found or you are not authorized",
-      });
-    }
-
-    if (!task.pendingHelperId) {
-      return res.status(400).json({
-        success: false,
-        message: "No pending helper request for this task",
-      });
-    }
-
-    const helperId = task.pendingHelperId;
-
-    // Clear pending helper
-    task.pendingHelperId = null;
-    await task.save();
-
-    // Notify helper
-    await Notification.create({
-      userId: helperId,
-      taskId: task.id,
-      title: "Request Not Approved",
-      message: `Your request to accept "${task.title}" was not approved. ${reason ? `Reason: ${reason}` : 'You can request other available tasks.'}`,
-      type: "request_rejected",
-      priority: "medium",
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Helper request rejected",
-    });
-  } catch (error) {
-    console.error("Reject helper request error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to reject helper request",
-      error: error.message,
-    });
-  }
-};
 
 // Regenerate OTP for task (Helpseeker)
 const regenerateOTP = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const helpseekerId = req.user.id;
     const { taskId } = req.params;
-
-    const task = await Task.findOne({ where: { id: taskId, userId } });
-
-    if (!task) {
+    
+    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });    if (!task) {
       return res.status(404).json({
         success: false,
         message: "Task not found",
@@ -1316,13 +985,14 @@ const regenerateOTP = async (req, res) => {
     await task.save();
 
     // Get helper details
-    const helper = await User.findByPk(task.assignedHelperId, {
+    const helper = await Helper.findByPk(task.assignedHelperId, {
       attributes: ["id", "fullName"],
     });
 
     // Notify helpseeker
     await Notification.create({
-      userId: userId,
+      helpseekerId: helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "New OTP Generated",
       message: `New verification OTP for "${task.title}" is: ${newOtp}. Share this with ${helper.fullName}.`,
@@ -1332,7 +1002,8 @@ const regenerateOTP = async (req, res) => {
 
     // Notify helper
     await Notification.create({
-      userId: task.assignedHelperId,
+      helperId: task.assignedHelperId,
+      userType: 'helper',
       taskId: task.id,
       title: "New OTP Generated",
       message: `A new OTP has been generated for "${task.title}". Please ask the helpseeker for the updated OTP.`,
@@ -1360,103 +1031,7 @@ const regenerateOTP = async (req, res) => {
   }
 };
 
-// Get tasks with pending helper requests (Helpseeker)
-const getTasksWithPendingHelpers = async (req, res) => {
-  try {
-    const userId = req.user.id;
 
-    // Find all tasks created by this helpseeker that have pending helpers
-    const tasks = await Task.findAll({
-      where: {
-        userId: userId,
-        pendingHelperId: { [require("sequelize").Op.ne]: null }, // Has pending helper
-        status: "in_queue", // Still in queue (not assigned yet)
-      },
-      include: [
-        {
-          model: User,
-          as: "pendingHelper", // We need to add this association
-          attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
-        },
-      ],
-      order: [["createdAt", "DESC"]],
-    });
-
-    res.status(200).json({
-      success: true,
-      message: `Found ${tasks.length} tasks with pending helper requests`,
-      data: tasks,
-    });
-  } catch (error) {
-    console.error("Get tasks with pending helpers error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch tasks with pending helpers",
-      error: error.message,
-    });
-  }
-};
-
-// Get pending helper request for a specific task (Helpseeker)
-const getPendingHelperForTask = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { taskId } = req.params;
-
-    const task = await Task.findOne({
-      where: {
-        id: taskId,
-        userId: userId,
-      },
-      include: [
-        {
-          model: User,
-          as: "pendingHelper",
-          attributes: ["id", "fullName", "email", "phone", "profilePhoto", "createdAt"],
-        },
-      ],
-    });
-
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        message: "Task not found or you are not authorized",
-      });
-    }
-
-    if (!task.pendingHelperId) {
-      return res.status(200).json({
-        success: true,
-        message: "No pending helper request for this task",
-        data: {
-          taskId: task.id,
-          taskTitle: task.title,
-          hasPendingHelper: false,
-          pendingHelper: null,
-        },
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Pending helper request found",
-      data: {
-        taskId: task.id,
-        taskTitle: task.title,
-        hasPendingHelper: true,
-        pendingHelper: task.pendingHelper,
-        requestedAt: task.updatedAt, // Approximate time when helper requested
-      },
-    });
-  } catch (error) {
-    console.error("Get pending helper for task error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch pending helper",
-      error: error.message,
-    });
-  }
-};
 
 module.exports = {
   createTask,
@@ -1469,9 +1044,6 @@ module.exports = {
   updateTask,
   cancelTask,
   increaseReward,
-  approveHelperRequest,
-  rejectHelperRequest,
   regenerateOTP,
-  getTasksWithPendingHelpers,
-  getPendingHelperForTask,
+
 };

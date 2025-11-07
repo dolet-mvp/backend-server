@@ -17,18 +17,20 @@ const Payment = sequelize.define(
       },
       allowNull: false,
     },
+    // Payer is always helpseeker
     payerId: {
       type: DataTypes.UUID,
       references: {
-        model: "users",
+        model: "helpseekers",
         key: "id",
       },
       allowNull: false,
     },
+    // Receiver is always helper
     receiverId: {
       type: DataTypes.UUID,
       references: {
-        model: "users",
+        model: "helpers",
         key: "id",
       },
       allowNull: false,

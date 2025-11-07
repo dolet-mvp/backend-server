@@ -1,12 +1,12 @@
-const HelperProfile = require("../../models/helperModel/helperModel");
-const User = require("../../models/authModel/userModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Task = require("../../models/taskModel/taskModel");
 const Rating = require("../../models/ratingModel/ratingModel");
 
 // Create or update helper profile
 const updateHelperProfile = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const helperId = req.user.id;
 
 
     const {
@@ -17,62 +17,46 @@ const updateHelperProfile = async (req, res) => {
       serviceRadius,
       isAvailable,
       preferences,
+      fullName,
+      phone,
+      email,
     } = req.body;
 
-    let helperProfile = await HelperProfile.findOne({ where: { userId } });
+    const helper = await Helper.findByPk(helperId);
 
-    if (helperProfile) {
-      // Update existing profile
-      const updateData = {
-        skills: skills || helperProfile.skills,
-        experience: experience || helperProfile.experience,
-        hourlyRate: hourlyRate || helperProfile.hourlyRate,
-        availability: availability || helperProfile.availability,
-        serviceRadius: serviceRadius || helperProfile.serviceRadius,
-        isAvailable:
-          isAvailable !== undefined ? isAvailable : helperProfile.isAvailable,
-        preferences: preferences || helperProfile.preferences,
-      };
-
-      // Handle uploaded documents (certifications, ID, etc.)
-      if (req.fileUrls && req.fileUrls.length > 0) {
-        const existingDocuments = helperProfile.documents || [];
-        updateData.documents = [...existingDocuments, ...req.fileUrls];
-      }
-
-      await helperProfile.update(updateData);
-
-      res.status(200).json({
-        success: true,
-        message: "Helper profile updated successfully",
-        data: helperProfile,
-      });
-    } else {
-      // Create new profile
-      const createData = {
-        userId,
-        skills: skills || [],
-        experience,
-        hourlyRate,
-        availability: availability || {},
-        serviceRadius: serviceRadius || 10,
-        isAvailable: isAvailable !== undefined ? isAvailable : true,
-        preferences: preferences || {},
-      };
-
-      // Handle uploaded documents for new profile
-      if (req.fileUrls && req.fileUrls.length > 0) {
-        createData.documents = req.fileUrls;
-      }
-
-      helperProfile = await HelperProfile.create(createData);
-
-      res.status(201).json({
-        success: true,
-        message: "Helper profile created successfully",
-        data: helperProfile,
+    if (!helper) {
+      return res.status(404).json({
+        success: false,
+        message: "Helper not found",
       });
     }
+
+    // Update helper profile
+    const updateData = {};
+    if (skills !== undefined) updateData.skills = skills;
+    if (experience !== undefined) updateData.experience = experience;
+    if (hourlyRate !== undefined) updateData.hourlyRate = hourlyRate;
+    if (availability !== undefined) updateData.availability = availability;
+    if (serviceRadius !== undefined) updateData.serviceRadius = serviceRadius;
+    if (isAvailable !== undefined) updateData.isAvailable = isAvailable;
+    if (preferences !== undefined) updateData.preferences = preferences;
+    if (fullName !== undefined) updateData.fullName = fullName;
+    if (phone !== undefined) updateData.phone = phone;
+    if (email !== undefined) updateData.email = email;
+
+    // Handle uploaded documents (certifications, ID, etc.)
+    if (req.fileUrls && req.fileUrls.length > 0) {
+      const existingDocuments = helper.documents || {};
+      updateData.documents = { ...existingDocuments, ...req.fileUrls };
+    }
+
+    await helper.update(updateData);
+
+    res.status(200).json({
+      success: true,
+      message: "Helper profile updated successfully",
+      data: helper,
+    });
   } catch (error) {
     console.error("Update helper profile error:", error);
     res.status(500).json({
@@ -86,20 +70,11 @@ const updateHelperProfile = async (req, res) => {
 // Get helper profile
 const getHelperProfile = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const { helperId } = req.params;
 
-    const helperProfile = await HelperProfile.findOne({
-      where: { userId },
-      include: [
-        {
-          model: User,
-          as: "user",
-          attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
-        },
-      ],
-    });
+    const helper = await Helper.findByPk(helperId);
 
-    if (!helperProfile) {
+    if (!helper) {
       return res.status(404).json({
         success: false,
         message: "Helper profile not found",
@@ -108,14 +83,7 @@ const getHelperProfile = async (req, res) => {
 
     // Get recent ratings
     const ratings = await Rating.findAll({
-      where: { revieweeId: userId, type: "user_to_helper", isVisible: true },
-      include: [
-        {
-          model: User,
-          as: "reviewer",
-          attributes: ["id", "fullName", "profilePhoto"],
-        },
-      ],
+      where: { revieweeId: helperId, revieweeType: 'helper', isVisible: true },
       limit: 10,
       order: [["createdAt", "DESC"]],
     });
@@ -123,7 +91,7 @@ const getHelperProfile = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        profile: helperProfile,
+        profile: helper,
         recentRatings: ratings,
       },
     });
@@ -140,22 +108,20 @@ const getHelperProfile = async (req, res) => {
 // Get my helper profile
 const getMyHelperProfile = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const helperId = req.user.id;
 
-    const helperProfile = await HelperProfile.findOne({
-      where: { userId },
-    });
+    const helper = await Helper.findByPk(helperId);
 
-    if (!helperProfile) {
+    if (!helper) {
       return res.status(404).json({
         success: false,
-        message: "Helper profile not found. Please create one first.",
+        message: "Helper profile not found.",
       });
     }
 
     res.status(200).json({
       success: true,
-      data: helperProfile,
+      data: helper,
     });
   } catch (error) {
     console.error("Get my helper profile error:", error);
@@ -167,49 +133,30 @@ const getMyHelperProfile = async (req, res) => {
   }
 };
 
-// Toggle helper availability (creates profile if not exists)
+// Toggle helper availability
 const toggleAvailability = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const helperId = req.user.id;
 
-    let helperProfile = await HelperProfile.findOne({ where: { userId } });
+    const helper = await Helper.findByPk(helperId);
 
-    if (!helperProfile) {
-      // Create new helper profile with default values if not exists
-      helperProfile = await HelperProfile.create({
-        userId,
-        skills: [],
-        experience: null,
-        hourlyRate: null,
-        availability: {},
-        serviceRadius: 10,
-        isAvailable: true, // Set to available when profile is created
-        preferences: {},
-        documents: [],
-      });
-
-      return res.status(201).json({
-        success: true,
-        message: "You are now online and available for tasks",
-        data: {
-          isAvailable: helperProfile.isAvailable,
-          profile: helperProfile,
-        },
+    if (!helper) {
+      return res.status(404).json({
+        success: false,
+        message: "Helper not found",
       });
     }
 
-    // Toggle availability for existing profile
-    helperProfile.isAvailable = !helperProfile.isAvailable;
-    await helperProfile.save();
+    // Toggle availability
+    helper.isAvailable = !helper.isAvailable;
+    await helper.save();
 
     res.status(200).json({
       success: true,
-      message: `You are now ${
-        helperProfile.isAvailable ? "online" : "offline"
-      }`,
+      message: `You are now ${helper.isAvailable ? "online" : "offline"}`,
       data: {
-        isAvailable: helperProfile.isAvailable,
-        profile: helperProfile,
+        isAvailable: helper.isAvailable,
+        helper: helper,
       },
     });
   } catch (error) {
@@ -228,7 +175,9 @@ const searchHelpers = async (req, res) => {
     const { skills, minRating, maxHourlyRate, serviceRadius, isAvailable } =
       req.query;
 
-    let whereClause = {};
+    let whereClause = {
+      verificationStatus: "approved", // Only show approved helpers
+    };
 
     if (isAvailable === "true") {
       whereClause.isAvailable = true;
@@ -246,16 +195,8 @@ const searchHelpers = async (req, res) => {
       whereClause.serviceRadius = { [require("sequelize").Op.gte]: serviceRadius };
     }
 
-    const helpers = await HelperProfile.findAll({
+    const helpers = await Helper.findAll({
       where: whereClause,
-      include: [
-        {
-          model: User,
-          as: "user",
-          attributes: ["id", "fullName", "profilePhoto"],
-          where: { isVerified: true, role: "helper" },
-        },
-      ],
       order: [
         ["averageRating", "DESC"],
         ["completedTasks", "DESC"],
@@ -293,16 +234,16 @@ const searchHelpers = async (req, res) => {
 // Get helper's completed tasks
 const getHelperCompletedTasks = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const { helperId } = req.params;
 
     const tasks = await Task.findAll({
       where: {
-        assignedHelperId: userId,
+        assignedHelperId: helperId,
         status: "completed",
       },
       include: [
         {
-          model: User,
+          model: Helpseeker,
           as: "creator",
           attributes: ["id", "fullName", "profilePhoto"],
         },
@@ -328,16 +269,16 @@ const getHelperCompletedTasks = async (req, res) => {
 // Get helper's active tasks
 const getHelperActiveTasks = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const helperId = req.user.id;
 
     const tasks = await Task.findAll({
       where: {
-        assignedHelperId: userId,
+        assignedHelperId: helperId,
         status: ["assigned", "in_progress"],
       },
       include: [
         {
-          model: User,
+          model: Helpseeker,
           as: "creator",
           attributes: ["id", "fullName", "profilePhoto", "phone"],
         },
@@ -362,9 +303,10 @@ const getHelperActiveTasks = async (req, res) => {
 // Get count of available helpers
 const getAvailableHelpersCount = async (req, res) => {
   try {
-    const count = await HelperProfile.count({
+    const count = await Helper.count({
       where: {
         isAvailable: true,
+        verificationStatus: "approved",
       },
     });
 

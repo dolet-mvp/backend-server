@@ -11,19 +11,66 @@ const {
   getHelperActiveTasks,
   getAvailableHelpersCount,
 } = require("../../controllers/helperController/helperController");
+const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
 
 // Helper profile management
-router.patch("/profile", supabaseUpload.array("documents", 10), updateHelperProfile);
-router.get("/profile/me", getMyHelperProfile);
-router.get("/profile/:userId", getHelperProfile);
-router.patch("/availability", toggleAvailability);
+router.patch(
+  "/profile",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  supabaseUpload.array("documents", 10),
+  updateHelperProfile
+);
+
+router.get(
+  "/profile/me",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  getMyHelperProfile
+);
+
+router.get(
+  "/profile/:userId",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker", "admin"]),
+  getHelperProfile
+);
+
+router.patch(
+  "/availability",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  toggleAvailability
+);
 
 // Helper search
-router.get("/search", searchHelpers);
-router.get("/available/count", getAvailableHelpersCount);
+router.get(
+  "/search",
+  checkForAuthenticationCookie(),
+  checkUserType(["helpseeker", "admin"]),
+  searchHelpers
+);
+
+router.get(
+  "/available/count",
+  checkForAuthenticationCookie(),
+  checkUserType(["helpseeker", "admin"]),
+  getAvailableHelpersCount
+);
 
 // Helper tasks
-router.get("/tasks/active", getHelperActiveTasks);
-router.get("/:userId/tasks/completed", getHelperCompletedTasks);
+router.get(
+  "/tasks/active",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  getHelperActiveTasks
+);
+
+router.get(
+  "/:userId/tasks/completed",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker", "admin"]),
+  getHelperCompletedTasks
+);
 
 module.exports = router;

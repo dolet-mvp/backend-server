@@ -15,7 +15,9 @@ const uploadToSupabase = async (file) => {
   const fileExt = path.extname(file.originalname);
   const fileName = `${uuidv4()}${fileExt}`;
 
-  const { error } = await supabase.storage
+  console.log(`Uploading to bucket: ${BUCKET_NAME}, filename: ${fileName}`);
+
+  const { data, error } = await supabase.storage
     .from(BUCKET_NAME)
     .upload(fileName, file.buffer, {
       cacheControl: "3600",
@@ -23,10 +25,13 @@ const uploadToSupabase = async (file) => {
       contentType: file.mimetype,
     });
 
-  if (error) throw error;
+  if (error) {
+    console.error("Supabase upload error:", error);
+    throw new Error(`Upload failed: ${error.message}`);
+  }
 
-  const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
-  return data.publicUrl;
+  const { data: urlData } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
+  return urlData.publicUrl;
 };
 
 const singleUpload = (fieldName) => [
@@ -59,4 +64,30 @@ const multipleUpload = (fieldName, maxCount = 5) => [
   },
 ];
 
-module.exports = { single: singleUpload, array: multipleUpload };
+const fieldsUpload = (fields) => [
+  upload.fields(fields),
+  async (req, res, next) => {
+    try {
+      if (req.files) {
+        req.fileUrls = {};
+        for (const fieldName in req.files) {
+          const filesArray = req.files[fieldName];
+          if (filesArray && filesArray.length > 0) {
+            if (filesArray.length === 1) {
+              req.fileUrls[fieldName] = await uploadToSupabase(filesArray[0]);
+            } else {
+              req.fileUrls[fieldName] = await Promise.all(
+                filesArray.map((file) => uploadToSupabase(file))
+              );
+            }
+          }
+        }
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
+  },
+];
+
+module.exports = { single: singleUpload, array: multipleUpload, fields: fieldsUpload };

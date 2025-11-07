@@ -7,12 +7,9 @@ const { initTaskScheduler } = require("./services/taskSchedulerService");
 const PORT = process.env.PORT || 8181;
 const app = express();
 
-// CORS configuration optimized for React Native
 app.use(
   cors({
     origin: function (origin, callback) {
-      // React Native apps don't send origin headers, so we allow requests without origin
-      // In development, also allow localhost origins for testing
       if (
         !origin ||
         origin.includes("localhost") ||
@@ -33,9 +30,8 @@ app.use(
 );
 
 app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: true }));
 
-const checkForAuthenticationCookie = require("./middleware/authMiddleware");
 
 const authRoutes = require("./routes/authRoute/authRoute");
 const profileRoutes = require("./routes/profileRoute/profileRoute");
@@ -55,73 +51,64 @@ const geminiRoutes = require("./routes/aiRoute/gemniRoute");
 
 app.use("/api/auth", authRoutes);
 
-app.use("/api/ai",checkForAuthenticationCookie("token"), geminiRoutes);
+
+app.use("/api/ai", geminiRoutes);
 
 app.use(
   "/api/user",
-  checkForAuthenticationCookie("token"),
   profileRoutes, addressRoutes
 );
 
 app.use(
   "/api/tasks",
-  checkForAuthenticationCookie("token"),
   taskRoutes
 );
 
 // Bid management routes
 app.use(
   "/api/bids",
-  checkForAuthenticationCookie("token"),
   bidRoutes
 );
 
 // Task tracking routes
 app.use(
   "/api/tracking",
-  checkForAuthenticationCookie("token"),
   trackingRoutes
 );
 
 // Payment routes
 app.use(
   "/api/payments",
-  checkForAuthenticationCookie("token"),
   paymentRoutes
 );
 
 // Rating routes
 app.use(
   "/api/ratings",
-  checkForAuthenticationCookie("token"),
   ratingRoutes
 );
 
 // Helper profile routes
 app.use(
   "/api/helpers",
-  checkForAuthenticationCookie("token"),
   helperRoutes
 );
 
 // Notification routes
 app.use(
   "/api/notifications",
-  checkForAuthenticationCookie("token"),
   notificationRoutes
 );
 
 // Support ticket routes
 app.use(
   "/api/support",
-  checkForAuthenticationCookie("token"),
   supportRoutes
 );
 
 // Task message routes
 app.use(
   "/api/messages",
-  checkForAuthenticationCookie("token"),
   taskMessageRoutes
 );
 

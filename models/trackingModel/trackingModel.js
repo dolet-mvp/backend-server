@@ -20,7 +20,7 @@ const TaskTracking = sequelize.define(
     helperId: {
       type: DataTypes.UUID,
       references: {
-        model: "users",
+        model: "helpers",
         key: "id",
       },
       allowNull: false,

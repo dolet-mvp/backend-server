@@ -1,8 +1,8 @@
 const Payment = require("../../models/paymentModel/paymentModel");
 const Task = require("../../models/taskModel/taskModel");
 const Notification = require("../../models/notificationModel/notificationModel");
-const HelperProfile = require("../../models/helperModel/helperModel");
-const User = require("../../models/authModel/userModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 
@@ -18,7 +18,7 @@ const requestPayment = async (req, res) => {
     const helperId = req.user.id;
     const { taskId } = req.params;
 
-    if (req.user.role !== "helper") {
+    if (req.user.userType !== "helper") {
       return res.status(403).json({
         success: false,
         message: "Only helpers can request payment",
@@ -29,7 +29,7 @@ const requestPayment = async (req, res) => {
       where: { id: taskId, assignedHelperId: helperId },
       include: [
         {
-          model: User,
+          model: Helpseeker,
           as: "creator",
           attributes: ["id", "fullName", "email", "phone"],
         },
@@ -77,14 +77,14 @@ const requestPayment = async (req, res) => {
         taskId: taskId,
         taskTitle: task.title,
         helperId: helperId,
-        helpseekerUserId: task.userId,
+        helpseekerId: task.helpseekerId,
       },
     });
 
     // Create payment record in database
     const payment = await Payment.create({
       taskId,
-      payerId: task.userId,
+      payerId: task.helpseekerId,
       receiverId: helperId,
       amount,
       platformFee,
@@ -99,7 +99,8 @@ const requestPayment = async (req, res) => {
 
     // Notify helpseeker about payment request
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "Payment Request",
       message: `Helper has requested payment of ₹${amount.toFixed(2)} for "${task.title}"`,
@@ -109,7 +110,8 @@ const requestPayment = async (req, res) => {
 
     // Notify helper that request was sent
     await Notification.create({
-      userId: helperId,
+      helperId: helperId,
+      userType: 'helper',
       taskId: task.id,
       title: "Payment Request Sent",
       message: `Your payment request for ₹${amount.toFixed(2)} has been sent to the helpseeker`,
@@ -201,20 +203,19 @@ const verifyPayment = async (req, res) => {
     await payment.save();
 
     // Update helper earnings
-    const helperProfile = await HelperProfile.findOne({
-      where: { userId: payment.receiverId },
-    });
+    const helper = await Helper.findByPk(payment.receiverId);
 
-    if (helperProfile) {
-      helperProfile.totalEarnings =
-        parseFloat(helperProfile.totalEarnings) + parseFloat(payment.netAmount);
-      helperProfile.completedTasks += 1;
-      await helperProfile.save();
+    if (helper) {
+      helper.totalEarnings =
+        parseFloat(helper.totalEarnings || 0) + parseFloat(payment.netAmount);
+      helper.completedTasks = (helper.completedTasks || 0) + 1;
+      await helper.save();
     }
 
     // Notify helper about received payment
     await Notification.create({
-      userId: payment.receiverId,
+      helperId: payment.receiverId,
+      userType: 'helper',
       taskId: payment.taskId,
       title: "Payment Received! 💰",
       message: `You received ₹${parseFloat(payment.netAmount).toFixed(2)} for "${payment.task.title}"`,
@@ -224,7 +225,8 @@ const verifyPayment = async (req, res) => {
 
     // Notify helpseeker about successful payment
     await Notification.create({
-      userId: payment.payerId,
+      helpseekerId: payment.payerId,
+      userType: 'helpseeker',
       taskId: payment.taskId,
       title: "Payment Successful ✅",
       message: `Payment of ₹${parseFloat(payment.amount).toFixed(2)} sent successfully for "${payment.task.title}"`,
@@ -263,7 +265,7 @@ const getPaymentRequest = async (req, res) => {
     }
 
     // Verify user is task creator (helpseeker)
-    if (task.userId !== userId) {
+    if (task.helpseekerId !== userId) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized to view payment request",
@@ -274,7 +276,7 @@ const getPaymentRequest = async (req, res) => {
       where: { taskId },
       include: [
         {
-          model: User,
+          model: Helper,
           as: "receiver",
           attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
         },
@@ -320,9 +322,9 @@ const getPaymentHistory = async (req, res) => {
 
     let whereClause = {};
 
-    if (req.user.role === "helper") {
+    if (req.user.userType === "helper") {
       whereClause.receiverId = userId;
-    } else {
+    } else if (req.user.userType === "helpseeker") {
       whereClause.payerId = userId;
     }
 

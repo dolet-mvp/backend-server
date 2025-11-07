@@ -1,10 +1,12 @@
 const Address = require("../../models/addressModel/addressModel");
-const User = require("../../models/authModel/userModel");
 const { Op } = require("sequelize");
+
 
 const createAddress = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType; 
+    
     const { 
       addressLine1, 
       addressLine2, 
@@ -17,15 +19,35 @@ const createAddress = async (req, res) => {
       isDefault 
     } = req.body;
 
+    if (!['helper', 'helpseeker'].includes(userType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user type"
+      });
+    }
+
+    // Build where clause for polymorphic relationship
+    const whereClause = {
+      userType,
+      isDefault: true
+    };
+    
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else {
+      whereClause.helpseekerId = userId;
+    }
+
+    // If setting as default, unset other default addresses
     if (isDefault) {
       await Address.update(
         { isDefault: false },
-        { where: { userId, isDefault: true } }
+        { where: whereClause }
       );
     }
 
-    const address = await Address.create({
-      userId,
+
+    const addressData = {
       addressLine1,
       addressLine2,
       city,
@@ -34,8 +56,18 @@ const createAddress = async (req, res) => {
       latitude,
       longitude,
       type: type || "home",
-      isDefault: isDefault || false
-    });
+      isDefault: isDefault || false,
+      userType
+    };
+
+    // Set the appropriate foreign key
+    if (userType === 'helper') {
+      addressData.helperId = userId;
+    } else {
+      addressData.helpseekerId = userId;
+    }
+
+    const address = await Address.create(addressData);
 
     res.status(201).json({
       success: true,
@@ -54,14 +86,25 @@ const createAddress = async (req, res) => {
   }
 };
 
+
 const getUserAddresses = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { type } = req.query;
+    const userType = req.user.userType;
 
-    let whereClause = { userId };
-    if (type && ["home", "work", "other"].includes(type)) {
-      whereClause.type = type;
+
+    // Build where clause for polymorphic relationship
+    let whereClause = { userType };
+    
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user type"
+      });
     }
 
     const addresses = await Address.findAll({
@@ -94,12 +137,27 @@ const getAddressById = async (req, res) => {
   try {
     const { addressId } = req.params;
     const userId = req.user.id;
+    const userType = req.user.userType;
+
+    // Build where clause
+    const whereClause = { 
+      id: addressId,
+      userType
+    };
+    
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user type"
+      });
+    }
 
     const address = await Address.findOne({
-      where: { 
-        id: addressId,
-        userId 
-      }
+      where: whereClause
     });
 
     if (!address) {
@@ -126,10 +184,12 @@ const getAddressById = async (req, res) => {
   }
 };
 
+
 const updateAddress = async (req, res) => {
   try {
     const { addressId } = req.params;
     const userId = req.user.id;
+    const userType = req.user.userType;
     const { 
       addressLine1, 
       addressLine2, 
@@ -142,11 +202,25 @@ const updateAddress = async (req, res) => {
       isDefault 
     } = req.body;
 
+    // Build where clause
+    const whereClause = { 
+      id: addressId,
+      userType
+    };
+    
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user type"
+      });
+    }
+
     const address = await Address.findOne({
-      where: { 
-        id: addressId,
-        userId 
-      }
+      where: whereClause
     });
 
     if (!address) {
@@ -156,10 +230,22 @@ const updateAddress = async (req, res) => {
       });
     }
 
+    // If setting as default, unset other defaults
     if (isDefault && !address.isDefault) {
+      const updateWhere = {
+        userType,
+        isDefault: true
+      };
+      
+      if (userType === 'helper') {
+        updateWhere.helperId = userId;
+      } else {
+        updateWhere.helpseekerId = userId;
+      }
+
       await Address.update(
         { isDefault: false },
-        { where: { userId, isDefault: true } }
+        { where: updateWhere }
       );
     }
 
@@ -192,16 +278,32 @@ const updateAddress = async (req, res) => {
   }
 };
 
+
 const deleteAddress = async (req, res) => {
   try {
     const { addressId } = req.params;
     const userId = req.user.id;
+    const userType = req.user.userType;
+
+    // Build where clause
+    const whereClause = { 
+      id: addressId,
+      userType
+    };
+    
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user type"
+      });
+    }
 
     const address = await Address.findOne({
-      where: { 
-        id: addressId,
-        userId 
-      }
+      where: whereClause
     });
 
     if (!address) {
@@ -213,9 +315,18 @@ const deleteAddress = async (req, res) => {
 
     await address.destroy();
 
+    // If deleted address was default, set another as default
     if (address.isDefault) {
+      const nextWhereClause = { userType };
+      
+      if (userType === 'helper') {
+        nextWhereClause.helperId = userId;
+      } else {
+        nextWhereClause.helpseekerId = userId;
+      }
+
       const nextAddress = await Address.findOne({
-        where: { userId },
+        where: nextWhereClause,
         order: [["createdAt", "ASC"]]
       });
       
@@ -242,12 +353,22 @@ const setDefaultAddress = async (req, res) => {
   try {
     const { addressId } = req.params;
     const userId = req.user.id;
+    const userType = req.user.userType;
+
+    // Build where clause for polymorphic relationship
+    const whereClause = {
+      id: addressId,
+      userType
+    };
+    
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else {
+      whereClause.helpseekerId = userId;
+    }
 
     const address = await Address.findOne({
-      where: { 
-        id: addressId,
-        userId 
-      }
+      where: whereClause
     });
 
     if (!address) {
@@ -257,9 +378,17 @@ const setDefaultAddress = async (req, res) => {
       });
     }
 
+    // Unset all default addresses for this user
+    const updateWhereClause = { userType };
+    if (userType === 'helper') {
+      updateWhereClause.helperId = userId;
+    } else {
+      updateWhereClause.helpseekerId = userId;
+    }
+
     await Address.update(
       { isDefault: false },
-      { where: { userId } }
+      { where: updateWhereClause }
     );
 
     await address.update({ isDefault: true });
@@ -285,12 +414,22 @@ const setDefaultAddress = async (req, res) => {
 const getDefaultAddress = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType;
+
+    // Build where clause for polymorphic relationship
+    const whereClause = {
+      userType,
+      isDefault: true
+    };
+    
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else {
+      whereClause.helpseekerId = userId;
+    }
 
     const defaultAddress = await Address.findOne({
-      where: { 
-        userId,
-        isDefault: true 
-      }
+      where: whereClause
     });
 
     if (!defaultAddress) {

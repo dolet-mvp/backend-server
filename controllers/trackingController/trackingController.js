@@ -1,7 +1,8 @@
 const TaskTracking = require("../../models/trackingModel/trackingModel");
 const Task = require("../../models/taskModel/taskModel");
 const Notification = require("../../models/notificationModel/notificationModel");
-const User = require("../../models/authModel/userModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 
 // Update helper status - On the way
 const updateOnTheWay = async (req, res) => {
@@ -10,7 +11,7 @@ const updateOnTheWay = async (req, res) => {
     const { taskId } = req.params;
     const { currentLocation, estimatedArrival } = req.body;
 
-    if (req.user.role !== "helper") {
+    if (req.user.userType !== "helper") {
       return res.status(403).json({
         success: false,
         message: "Only helpers can update tracking",
@@ -45,7 +46,8 @@ const updateOnTheWay = async (req, res) => {
 
     // Notify helpseeker
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "Helper is on the way",
       message: `Your helper is on the way to "${task.title}"`,
@@ -96,7 +98,8 @@ const markArrived = async (req, res) => {
 
     // Notify helpseeker
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "Helper Arrived",
       message: `Your helper has arrived for "${task.title}"`,
@@ -161,7 +164,8 @@ const startWork = async (req, res) => {
 
     // Notify helpseeker
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "Work Started",
       message: `Helper has started working on "${task.title}"`,
@@ -245,7 +249,8 @@ const completeWork = async (req, res) => {
 
     // Notify helpseeker with OTP
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "Task Completion Verification Required",
       message: `Helper has completed "${task.title}". Your OTP for verification is: ${completionOtp}. Please share this OTP with the helper to confirm task completion.`,
@@ -304,7 +309,7 @@ const getTaskTracking = async (req, res) => {
       order: [["createdAt", "ASC"]],
       include: [
         {
-          model: User,
+          model: Helper,
           as: "helper",
           attributes: ["id", "fullName", "profilePhoto", "phone"],
         },
@@ -443,7 +448,8 @@ const verifyCompletionOtp = async (req, res) => {
 
     // Notify helpseeker that task is now completed
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "Task Completed Successfully",
       message: `Task "${task.title}" has been verified and marked as completed.`,
@@ -453,7 +459,8 @@ const verifyCompletionOtp = async (req, res) => {
 
     // Notify helper
     await Notification.create({
-      userId: helperId,
+      helperId: helperId,
+      userType: 'helper',
       taskId: task.id,
       title: "Task Verified",
       message: `Task "${task.title}" has been verified by the helpseeker and marked as completed.`,

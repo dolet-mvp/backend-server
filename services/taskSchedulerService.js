@@ -2,7 +2,7 @@ const cron = require("node-cron");
 const { Op } = require("sequelize");
 const Task = require("../models/taskModel/taskModel");
 const TaskQueue = require("../models/queueModel/queueModel");
-const User = require("../models/authModel/userModel");
+const Helper = require("../models/authModel/helperModel");
 const Notification = require("../models/notificationModel/notificationModel");
 
 const publishScheduledTask = async (task) => {
@@ -25,12 +25,16 @@ const publishScheduledTask = async (task) => {
     });
 
     // Notify available helpers
-    const helpers = await User.findAll({
-      where: { role: "helper", isVerified: true },
+    const helpers = await Helper.findAll({
+      where: { 
+        verificationStatus: "approved",
+        isAvailable: true 
+      },
     });
 
     const notifications = helpers.map((helper) => ({
-      userId: helper.id,
+      helperId: helper.id,
+      userType: "helper",
       taskId: task.id,
       title: "New Task Available",
       message: `New task: ${task.title}`,
@@ -40,9 +44,10 @@ const publishScheduledTask = async (task) => {
 
     await Notification.bulkCreate(notifications);
 
-    // Notify task creator
+    // Notify task creator (helpseeker)
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: "helpseeker",
       taskId: task.id,
       title: "Task Published",
       message: `Your scheduled task "${task.title}" has been published successfully`,

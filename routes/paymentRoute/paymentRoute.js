@@ -7,25 +7,43 @@ const {
   getPaymentHistory,
   requestRefund,
 } = require("../../controllers/paymentController/paymentController");
-const { authorizeRoles } = require("../../middleware/roleMiddleware");
+const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
 
 // Helper routes - Request payment after completing task
 router.post(
   "/task/:taskId/request",
-  authorizeRoles(["helper"]),
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
   requestPayment
 );
 
 // Helpseeker routes - Verify and complete payment
-router.post("/verify", verifyPayment);
+router.post(
+  "/verify",
+  checkForAuthenticationCookie(),
+  checkUserType(["helpseeker"]),
+  verifyPayment
+);
+
 router.get(
   "/task/:taskId/request",
-  authorizeRoles(["helpseeker"]),
+  checkForAuthenticationCookie(),
+  checkUserType(["helpseeker"]),
   getPaymentRequest
 );
 
-router.post("/:paymentId/refund", requestRefund);
+router.post(
+  "/:paymentId/refund",
+  checkForAuthenticationCookie(),
+  checkUserType(["helpseeker", "admin"]),
+  requestRefund
+);
 
-router.get("/history", getPaymentHistory);
+router.get(
+  "/history",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  getPaymentHistory
+);
 
 module.exports = router;

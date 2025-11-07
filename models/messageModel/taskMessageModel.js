@@ -21,11 +21,10 @@ const TaskMessage = sequelize.define(
     senderId: {
       type: DataTypes.UUID,
       allowNull: false,
-      references: {
-        model: "users",
-        key: "id",
-      },
-      onDelete: "CASCADE",
+    },
+    senderType: {
+      type: DataTypes.ENUM("helper", "helpseeker"),
+      allowNull: false,
     },
     message: {
       type: DataTypes.TEXT,

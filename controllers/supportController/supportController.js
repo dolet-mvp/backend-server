@@ -1,7 +1,13 @@
 const SupportTicket = require("../../models/supportModel/supportTicketModel");
 const TicketReply = require("../../models/supportModel/ticketReplyModel");
-const User = require("../../models/authModel/userModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
+const Admin = require("../../models/authModel/adminModel");
 const Notification = require("../../models/notificationModel/notificationModel");
+
+// NOTE: This controller needs full polymorphic update for Helper/Helpseeker/Admin models
+// Currently using minimal fixes to allow server to start
+// TODO: Update all User model references to use polymorphic Helper/Helpseeker/Admin
 
 // Generate unique ticket ID
 const generateTicketId = () => {
@@ -133,7 +139,7 @@ const getTicketDetails = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const userId = req.user.id;
-    const userRole = req.user.role;
+    const userRole = req.user.userType; // Changed from role to userType
 
     // Check if ticketId is UUID (database id) or generated ticketId (TKT-XXXXX)
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticketId);
@@ -205,7 +211,7 @@ const replyToTicket = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const userId = req.user.id;
-    const userRole = req.user.role;
+    const userRole = req.user.userType; // Changed from role to userType
     const { message, isInternal } = req.body;
 
     if (!message) {

@@ -17,20 +17,21 @@ const Rating = sequelize.define(
       },
       allowNull: false,
     },
+    // Polymorphic - can be helper or helpseeker
     reviewerId: {
       type: DataTypes.UUID,
-      references: {
-        model: "users",
-        key: "id",
-      },
+      allowNull: false,
+    },
+    reviewerType: {
+      type: DataTypes.ENUM("helper", "helpseeker"),
       allowNull: false,
     },
     revieweeId: {
       type: DataTypes.UUID,
-      references: {
-        model: "users",
-        key: "id",
-      },
+      allowNull: false,
+    },
+    revieweeType: {
+      type: DataTypes.ENUM("helper", "helpseeker"),
       allowNull: false,
     },
     rating: {

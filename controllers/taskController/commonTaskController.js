@@ -1,5 +1,6 @@
 const Task = require("../../models/taskModel/taskModel");
-const User = require("../../models/authModel/userModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Address = require("../../models/addressModel/addressModel");
 const { Sequelize } = require("sequelize");
 
@@ -11,12 +12,12 @@ const getTaskById = async (req, res) => {
     const task = await Task.findByPk(taskId, {
       include: [
         {
-          model: User,
+          model: Helpseeker,
           as: "creator",
           attributes: ["id", "fullName", "profilePhoto", "phone"],
         },
         {
-          model: User,
+          model: Helper,
           as: "assignedHelper",
           attributes: ["id", "fullName", "profilePhoto", "phone"],
         },
@@ -47,13 +48,23 @@ const getTaskById = async (req, res) => {
 const getMostPopularJobsInArea = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType;
     const radius = 50; 
 
+    // Build polymorphic where clause
+    const addressWhere = {
+      isDefault: true,
+      userType
+    };
+    
+    if (userType === 'helper') {
+      addressWhere.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      addressWhere.helpseekerId = userId;
+    }
+
     const userAddress = await Address.findOne({
-      where: {
-        userId,
-        isDefault: true,
-      },
+      where: addressWhere,
     });
 
     if (!userAddress) {

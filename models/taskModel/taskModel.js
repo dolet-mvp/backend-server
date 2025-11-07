@@ -9,10 +9,10 @@ const Task = sequelize.define(
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    userId: {
+    helpseekerId: {
       type: DataTypes.UUID,
       references: {
-        model: "users",
+        model: "helpseekers",
         key: "id",
       },
       allowNull: false,
@@ -87,7 +87,7 @@ const Task = sequelize.define(
     assignedHelperId: {
       type: DataTypes.UUID,
       references: {
-        model: "users",
+        model: "helpers",
         key: "id",
       },
       allowNull: true,
@@ -95,7 +95,7 @@ const Task = sequelize.define(
     pendingHelperId: {
       type: DataTypes.UUID,
       references: {
-        model: "users",
+        model: "helpers",
         key: "id",
       },
       allowNull: true,

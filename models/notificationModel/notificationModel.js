@@ -9,12 +9,25 @@ const Notification = sequelize.define(
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    userId: {
+    // Polymorphic association - can belong to helper or helpseeker
+    helperId: {
       type: DataTypes.UUID,
       references: {
-        model: "users",
+        model: "helpers",
         key: "id",
       },
+      allowNull: true,
+    },
+    helpseekerId: {
+      type: DataTypes.UUID,
+      references: {
+        model: "helpseekers",
+        key: "id",
+      },
+      allowNull: true,
+    },
+    userType: {
+      type: DataTypes.ENUM("helper", "helpseeker"),
       allowNull: false,
     },
     taskId: {

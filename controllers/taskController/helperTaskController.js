@@ -1,15 +1,14 @@
 const Task = require("../../models/taskModel/taskModel");
 const TaskQueue = require("../../models/queueModel/queueModel");
 const Notification = require("../../models/notificationModel/notificationModel");
-const User = require("../../models/authModel/userModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Address = require("../../models/addressModel/addressModel");
 
-// Generate 6-digit OTP
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Haversine formula to calculate distance between two points
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371; // Radius of Earth in kilometers
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -25,34 +24,23 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return distance;
 };
 
-// Get available tasks in queue (Helper)
 const getAvailableTasks = async (req, res) => {
   try {
     const helperId = req.user?.id; 
     console.log("Helper ID:", helperId);
-    const { 
-      category, 
-      budget, 
-      lat, 
-      lng, 
-      radius = 50 
-    } = req.query;
-
+    const radius   = process.env.TASK_SEARCH_RADIUS
     // Check if helper is available/online
     if (helperId) {
-      const HelperProfile = require("../../models/helperModel/helperModel");
-      const helperProfile = await HelperProfile.findOne({ 
-        where: { userId: helperId } 
-      });
+      const helper = await Helper.findByPk(helperId);
 
-      if (!helperProfile || !helperProfile.isAvailable) {
+      if (!helper || !helper.isApproved || helper.verificationStatus !== 'approved') {
         return res.status(200).json({
           success: true,
-          message: "You are currently offline. Please go online to see available tasks.",
+          message: "You are currently offline or not approved. Please go online to see available tasks.",
           data: [],
           meta: {
-            isHelperAvailable: false,
-            helperStatus: "offline",
+            isHelperAvailable: helper?.isAvailable || false,
+            helperStatus: helper?.verificationStatus || "unknown",
           },
         });
       }
@@ -61,11 +49,10 @@ const getAvailableTasks = async (req, res) => {
     let helperLat, helperLng;
     let helperAddress = null;
 
-    // If helper is authenticated, try to fetch their address from AddressModel
     if (helperId) {
       helperAddress = await Address.findOne({
-        where: { userId: helperId },
-        attributes: ['id', 'addressLine1', 'addressLine2', 'city', 'state', 'postalCode', 'latitude', 'longitude', 'type'],
+        where: { helperId: helperId, userType: 'helper' },
+        attributes: ['id', 'addressLine1', 'addressLine2', 'city', 'state', 'postalCode', 'latitude', 'longitude',],
         order: [['createdAt', 'DESC']], // Get most recent address
       });
 
@@ -108,13 +95,7 @@ const getAvailableTasks = async (req, res) => {
 
     const whereClause = { status: "in_queue" };
     
-    if (category) {
-      whereClause.category = category;
-    }
-
-    if (budget) {
-      whereClause.budget = { [require("sequelize").Op.lte]: parseFloat(budget) };
-    }
+   
 
     // Get all tasks in queue
     const tasks = await Task.findAll({
@@ -133,15 +114,12 @@ const getAvailableTasks = async (req, res) => {
       order: [["createdAt", "DESC"]],
     });
 
-    // Filter tasks by location radius
     const nearbyTasks = tasks
       .filter((task) => {
-        // If task doesn't require location or has no location, include it
         if (!task.locationRequired || !task.location) {
           return true;
         }
 
-        // If task has location, check if it's within radius
         if (task.location.lat && task.location.lng) {
           const distance = calculateDistance(
             helperLat,
@@ -205,7 +183,6 @@ const getAvailableTasks = async (req, res) => {
   }
 };
 
-// Accept task directly (Helper) - Generates OTP and assigns task
 const acceptTask = async (req, res) => {
   try {
     const helperId = req.user.id;
@@ -214,7 +191,7 @@ const acceptTask = async (req, res) => {
     const task = await Task.findByPk(taskId, {
       include: [
         {
-          model: User,
+          model: Helpseeker,
           as: "creator",
           attributes: ["id", "fullName", "email", "phone"],
         },
@@ -244,7 +221,7 @@ const acceptTask = async (req, res) => {
     }
 
     // Get helper details
-    const helper = await User.findByPk(helperId, {
+    const helper = await Helper.findByPk(helperId, {
       attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
     });
 
@@ -267,7 +244,8 @@ const acceptTask = async (req, res) => {
 
     // Notify helpseeker with OTP and helper details
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "Task Accepted by Helper",
       message: `${helper.fullName} has accepted your task "${task.title}". OTP: ${otp}. Share this OTP with the helper to start the task.`,
@@ -277,7 +255,8 @@ const acceptTask = async (req, res) => {
 
     // Notify helper
     await Notification.create({
-      userId: helperId,
+      helperId: helperId,
+      userType: 'helper',
       taskId: task.id,
       title: "Task Accepted Successfully",
       message: `You have accepted "${task.title}". The helpseeker will share the OTP with you to start the task. Contact: ${task.creator.fullName} (${task.creator.phone || task.creator.email})`,
@@ -329,7 +308,7 @@ const rejectTask = async (req, res) => {
     const task = await Task.findByPk(taskId, {
       include: [
         {
-          model: User,
+          model: Helpseeker,
           as: "creator",
           attributes: ["id", "fullName"],
         },
@@ -351,16 +330,14 @@ const rejectTask = async (req, res) => {
     }
 
     // Get helper details
-    const helper = await User.findByPk(helperId, {
+    const helper = await Helper.findByPk(helperId, {
       attributes: ["id", "fullName"],
     });
 
-    // Log the rejection (optional - you can create a rejection table if needed)
-    // For now, we'll just notify the helpseeker
-
     // Notify helpseeker about rejection
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "Task Declined",
       message: `${helper.fullName} has declined your task "${task.title}". Reason: ${reason}`,
@@ -386,7 +363,6 @@ const rejectTask = async (req, res) => {
   }
 };
 
-// Verify OTP and start task (Helper) - Step 3: Helper verifies OTP to start work
 const verifyOTPAndStartTask = async (req, res) => {
   try {
     const helperId = req.user.id;
@@ -461,7 +437,8 @@ const verifyOTPAndStartTask = async (req, res) => {
 
     // Notify helpseeker
     await Notification.create({
-      userId: task.userId,
+      helpseekerId: task.helpseekerId,
+      userType: 'helpseeker',
       taskId: task.id,
       title: "Work Started",
       message: `Helper has verified OTP and started working on "${task.title}"`,
@@ -471,7 +448,8 @@ const verifyOTPAndStartTask = async (req, res) => {
 
     // Notify helper
     await Notification.create({
-      userId: helperId,
+      helperId: helperId,
+      userType: 'helper',
       taskId: task.id,
       title: "Work Started",
       message: `You have successfully verified OTP and started working on "${task.title}"`,

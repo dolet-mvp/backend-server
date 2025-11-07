@@ -1,6 +1,7 @@
 const TaskMessage = require("../../models/messageModel/taskMessageModel");
 const Task = require("../../models/taskModel/taskModel");
-const User = require("../../models/authModel/userModel");
+const Helper = require("../../models/authModel/helperModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Notification = require("../../models/notificationModel/notificationModel");
 const { Op } = require("sequelize");
 
@@ -33,7 +34,7 @@ const sendTaskMessage = async (req, res) => {
 
     // Verify that the sender is either the task creator or assigned helper
     if (
-      task.userId !== senderId &&
+      task.helpseekerId !== senderId &&
       task.assignedHelperId !== senderId
     ) {
       return res.status(403).json({
@@ -56,35 +57,51 @@ const sendTaskMessage = async (req, res) => {
       attachments = req.fileUrls;
     }
 
+    // Determine sender type
+    const senderType = req.user.userType;
+
     // Create the message
     const taskMessage = await TaskMessage.create({
       taskId,
       senderId,
+      senderType,
       message: message.trim(),
       attachments,
     });
 
     // Fetch the message with sender details
+    const senderModel = senderType === 'helper' ? Helper : Helpseeker;
     const messageWithDetails = await TaskMessage.findByPk(taskMessage.id, {
       include: [
         {
-          model: User,
+          model: senderModel,
           as: "sender",
-          attributes: ["id", "firstName", "lastName", "email", "profilePicture"],
+          attributes: ["id", "fullName", "email", "profilePhoto"],
         },
       ],
     });
 
     // Send notification to the other user
-    const receiverId = senderId === task.userId ? task.assignedHelperId : task.userId;
+    const isHelpseekerSender = senderId === task.helpseekerId;
+    const receiverId = isHelpseekerSender ? task.assignedHelperId : task.helpseekerId;
+    const receiverType = isHelpseekerSender ? 'helper' : 'helpseeker';
+    
     if (receiverId) {
-      await Notification.create({
-        userId: receiverId,
+      const notificationData = {
         type: "general",
         title: "New Task Message",
         message: `You have a new message for task: ${task.title}`,
         relatedId: taskId,
-      });
+        userType: receiverType,
+      };
+      
+      if (receiverType === 'helper') {
+        notificationData.helperId = receiverId;
+      } else {
+        notificationData.helpseekerId = receiverId;
+      }
+      
+      await Notification.create(notificationData);
     }
 
     return res.status(201).json({
@@ -122,7 +139,7 @@ const getTaskMessages = async (req, res) => {
     }
 
     // Verify access
-    if (task.userId !== userId && task.assignedHelperId !== userId) {
+    if (task.helpseekerId !== userId && task.assignedHelperId !== userId) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to view messages for this task",
@@ -132,14 +149,21 @@ const getTaskMessages = async (req, res) => {
     // Calculate pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    // Get messages
+    // Get messages with both helper and helpseeker includes
     const { count, rows: messages } = await TaskMessage.findAndCountAll({
       where: { taskId },
       include: [
         {
-          model: User,
-          as: "sender",
-          attributes: ["id", "firstName", "lastName", "email", "profilePicture"],
+          model: Helper,
+          as: "senderHelper",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "senderHelpseeker",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
         },
       ],
       order: [["createdAt", "ASC"]],
@@ -162,7 +186,7 @@ const getTaskMessages = async (req, res) => {
           id: task.id,
           title: task.title,
           status: task.status,
-          creatorId: task.userId,
+          creatorId: task.helpseekerId,
           helperId: task.assignedHelperId,
         },
       },
@@ -232,21 +256,21 @@ const getMyTasksWithMessages = async (req, res) => {
     const tasks = await Task.findAll({
       where: {
         [Op.or]: [
-          { userId: userId },
+          { helpseekerId: userId },
           { assignedHelperId: userId }
         ],
         assignedHelperId: { [Op.ne]: null }, // Only tasks with assigned helper
       },
       include: [
         {
-          model: User,
+          model: Helpseeker,
           as: "creator",
-          attributes: ["id", "firstName", "lastName", "profilePicture"],
+          attributes: ["id", "fullName", "profilePhoto"],
         },
         {
-          model: User,
+          model: Helper,
           as: "assignedHelper",
-          attributes: ["id", "firstName", "lastName", "profilePicture"],
+          attributes: ["id", "fullName", "profilePhoto"],
         },
         {
           model: TaskMessage,

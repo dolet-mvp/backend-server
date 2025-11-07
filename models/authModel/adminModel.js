@@ -1,51 +1,53 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../dbConnection/dbConfig");
 
-const User = sequelize.define(
-  "User",
+const Admin = sequelize.define(
+  "Admin",
   {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    googleId: {
-      type: DataTypes.STRING,
-    },
     fullName: {
       type: DataTypes.STRING,
-      allowNull: true,
+      allowNull: false,
     },
     email: {
       type: DataTypes.STRING,
-      allowNull: true,
+      allowNull: false,
       unique: true,
     },
     password: {
       type: DataTypes.STRING,
-      allowNull: true,
-    },
-    profilePhoto: {
-      type: DataTypes.STRING,
+      allowNull: false,
     },
     phone: {
       type: DataTypes.STRING,
       allowNull: true,
       unique: true,
     },
-    isVerified: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
+    profilePhoto: {
+      type: DataTypes.STRING,
+      allowNull: true,
     },
     role: {
-      type: DataTypes.ENUM("helpseeker", "helper", "admin"),
-      defaultValue: "helpseeker",
+      type: DataTypes.ENUM("super_admin", "admin", "moderator"),
+      defaultValue: "admin",
+    },
+    isActive: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+    lastLogin: {
+      type: DataTypes.DATE,
+      allowNull: true,
     },
   },
   {
-    tableName: "users",
+    tableName: "admins",
     timestamps: true,
   }
 );
 
-module.exports = User;
+module.exports = Admin;

@@ -10,20 +10,58 @@ const {
   getTaskTracking,
   updateLocation,
 } = require("../../controllers/trackingController/trackingController");
+const { checkUserType,checkForAuthenticationCookie } = require("../../middleware/authMiddleware");
 
 // Helper routes
-router.post("/task/:taskId/on-the-way", updateOnTheWay);
-router.post("/task/:taskId/arrived", markArrived);
-router.post("/task/:taskId/start-work", startWork);
+router.post(
+  "/task/:taskId/on-the-way",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  updateOnTheWay
+);
+
+router.post(
+  "/task/:taskId/arrived",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  markArrived
+);
+
+router.post(
+  "/task/:taskId/start-work",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  startWork
+);
+
 router.post(
   "/task/:taskId/complete-work",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
   supabaseUpload.array("photos", 10),
   completeWork
 );
-router.post("/task/:taskId/verify-completion", verifyCompletionOtp);
-router.patch("/task/:taskId/location", updateLocation);
+
+router.post(
+  "/task/:taskId/verify-completion",
+  checkForAuthenticationCookie(),
+  checkUserType(["helpseeker"]),
+  verifyCompletionOtp
+);
+
+router.patch(
+  "/task/:taskId/location",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  updateLocation
+);
 
 // Common routes (both helper and helpseeker)
-router.get("/task/:taskId", getTaskTracking);
+router.get(
+  "/task/:taskId",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  getTaskTracking
+);
 
 module.exports = router;
