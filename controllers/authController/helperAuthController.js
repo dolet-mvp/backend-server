@@ -18,24 +18,36 @@ const handleHelperRegisterOrLogin = async (req, res) => {
 
     if (helper) {
       if (helper.verificationStatus === "pending") {
+         const token = createToken(helper, "helper");
         return res.status(403).json({
-          success: false,
+          success: true,
+          token,
+          helper,
+          userType: "helper",
           message: "Your account is pending , Please upload the required documents to proceed.",
           verificationStatus: "pending",
         });
       }
 
       if (helper.verificationStatus === "submitted") {
+       const token = createToken(helper, "helper");
         return res.status(403).json({
-          success: false,
+          success: true,
+          token,
+            helper,
+        userType: "helper",
           message: "Please wait your document is being reviewed, Will inform you once verified via mail or your phone number.",
           verificationStatus: "submitted",
         });
       }
 
       if (helper.verificationStatus === "rejected") {
+      const token = createToken(helper, "helper");
         return res.status(403).json({
-          success: false,
+          success: true,
+          token,
+          helper,
+          userType: "helper",
           message:"Your account has been rejected. Please contact support.",
           verificationStatus: "rejected",
           rejectionReason: helper.rejectionReason,

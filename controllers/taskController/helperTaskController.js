@@ -111,7 +111,7 @@ const getAvailableTasks = async (req, res) => {
         {
           model: Helpseeker,
           as: "creator",
-          attributes: ["id", "fullName", "profilePhoto"],
+          attributes: ["id", "fullName", "profilePhoto","phone"],
         },
       ],
       order: [["createdAt", "DESC"]],
