@@ -4,6 +4,7 @@ const Notification = require("../../models/notificationModel/notificationModel")
 const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Address = require("../../models/addressModel/addressModel");
+const axios = require("axios");
 
 
 const generateOTP = () => {
@@ -437,6 +438,53 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return distance; // Returns distance in kilometers
 };
 
+// Get distances using Google Maps Distance Matrix API
+const getGoogleMapsDistances = async (origin, destinations) => {
+  try {
+    const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+    
+    if (!GOOGLE_MAPS_API_KEY) {
+      console.warn("⚠️ Google Maps API key not found, falling back to Haversine formula");
+      return null;
+    }
+
+    // Format origin and destinations for API
+    const originStr = `${origin.lat},${origin.lng}`;
+    const destinationsStr = destinations
+      .map((dest) => `${dest.lat},${dest.lng}`)
+      .join("|");
+
+    const url = `https://maps.googleapis.com/maps/api/distancematrix/json`;
+    
+    const response = await axios.get(url, {
+      params: {
+        origins: originStr,
+        destinations: destinationsStr,
+        key: GOOGLE_MAPS_API_KEY,
+        mode: "driving", // or "walking", "bicycling", "transit"
+        units: "metric",
+      },
+    });
+
+    if (response.data.status !== "OK") {
+      console.warn(`⚠️ Google Maps API returned status: ${response.data.status}`);
+      return null;
+    }
+
+    // Extract distances from response
+    const results = response.data.rows[0]?.elements || [];
+    return results.map((element, index) => ({
+      helperIndex: index,
+      distance: element.status === "OK" ? element.distance.value / 1000 : null, // Convert meters to km
+      duration: element.status === "OK" ? element.duration.value / 60 : null, // Convert seconds to minutes
+      status: element.status,
+    }));
+  } catch (error) {
+    console.error("❌ Google Maps API error:", error.message);
+    return null;
+  }
+};
+
 // Get nearby helpers within radius (Helpseeker)
 const getNearbyHelpers = async (req, res) => {
   try {
@@ -576,6 +624,45 @@ const getNearbyHelpers = async (req, res) => {
       console.log(`🔍 Processing ${helpers.length} helpers...`);
     }
 
+    // Prepare helper locations for Google Maps API
+    const helperLocations = [];
+    const helperData = [];
+
+    for (const helper of helpers) {
+      const address = helper.addresses.find((addr) => addr.isDefault) || helper.addresses[0];
+      
+      if (!address) {
+        continue;
+      }
+
+      const helperLat = parseFloat(address.latitude);
+      const helperLng = parseFloat(address.longitude);
+
+      if (isNaN(helperLat) || isNaN(helperLng)) {
+        continue;
+      }
+
+      helperLocations.push({ lat: helperLat, lng: helperLng });
+      helperData.push({
+        id: helper.id,
+        fullName: helper.fullName,
+        location: {
+          latitude: helperLat,
+          longitude: helperLng,
+          city: address.city,
+          state: address.state,
+        },
+        isAvailable: helper.isAvailable,
+      });
+    }
+
+    // Get distances using Google Maps API
+    console.log(`\n📍 Using Google Maps API to calculate real road distances...`);
+    const googleDistances = await getGoogleMapsDistances(
+      { lat, lng },
+      helperLocations
+    );
+
     // Filter helpers within radius and format response
     const nearbyHelpers = [];
     const debugInfo = {
@@ -585,39 +672,34 @@ const getNearbyHelpers = async (req, res) => {
       skippedInvalidCoords: 0,
       skippedOutOfRadius: 0,
       skippedNotAvailable: 0,
-      withinRadius: 0
+      withinRadius: 0,
+      usingGoogleMaps: googleDistances !== null
     };
 
-    for (const helper of helpers) {
+    for (let i = 0; i < helperData.length; i++) {
+      const helper = helperData[i];
       debugInfo.processedHelpers++;
-      
-      // Get default address or first available address
-      const address = helper.addresses.find((addr) => addr.isDefault) || helper.addresses[0];
-      
-      if (!address) {
-        debugInfo.skippedNoAddress++;
-        console.log(`⚠️ Helper ${helper.fullName} (${helper.id}): No address found`);
-        continue;
+
+      let distance;
+      let duration = null;
+
+      // Use Google Maps distance if available, otherwise fallback to Haversine
+      if (googleDistances && googleDistances[i] && googleDistances[i].status === "OK") {
+        distance = googleDistances[i].distance;
+        duration = googleDistances[i].duration;
+        console.log(` Helper ${helper.fullName}:`);
+        console.log(`   📍 Location: (${helper.location.latitude}, ${helper.location.longitude}) - ${helper.location.city}`);
+        console.log(`   🚗 Road Distance: ${distance.toFixed(2)} km`);
+        console.log(`   ⏱️  Travel Time: ${Math.round(duration)} mins`);
+      } else {
+        // Fallback to Haversine formula
+        distance = calculateDistance(lat, lng, helper.location.latitude, helper.location.longitude);
+        console.log(` Helper ${helper.fullName}:`);
+        console.log(`   📍 Location: (${helper.location.latitude}, ${helper.location.longitude}) - ${helper.location.city}`);
+        console.log(`   📏 Straight-line Distance: ${distance.toFixed(2)} km (Haversine)`);
       }
 
-      const helperLat = parseFloat(address.latitude);
-      const helperLng = parseFloat(address.longitude);
-
-      if (isNaN(helperLat) || isNaN(helperLng)) {
-        debugInfo.skippedInvalidCoords++;
-        console.log(` Helper ${helper.fullName} (${helper.id}): Invalid coordinates (${address.latitude}, ${address.longitude})`);
-        continue;
-      }
-
-      // Calculate distance
-      const distance = calculateDistance(lat, lng, helperLat, helperLng);
-      
-      console.log(` Helper ${helper.fullName}:`);
-      console.log(`   Location: (${helperLat}, ${helperLng}) - ${address.city}`);
-      console.log(`   Distance: ${distance.toFixed(2)} km`);
-      console.log(`   Available: ${helper.isApproved}`);
-      console.log(`   Skills: ${JSON.stringify(helper.skills || [])}`);
-
+     
       // Check if within radius
       if (distance > searchRadius) {
         debugInfo.skippedOutOfRadius++;
@@ -625,26 +707,18 @@ const getNearbyHelpers = async (req, res) => {
         continue;
       }
 
-      // Check if available (already filtered in query, but double-check)
-      if (!helper.isApproved) {
-        debugInfo.skippedNotAvailable++;
-        console.log(`    Helper not available`);
-        continue;
-      }
+     
 
       debugInfo.withinRadius++;
-      console.log(`    Added to results!`);
+      console.log(`    ✅ Added to results!`);
 
       nearbyHelpers.push({
         id: helper.id,
         fullName: helper.fullName,
-        location: {
-          latitude: helperLat,
-          longitude: helperLng,
-          city: address.city,
-          state: address.state,
-        },
-        distance: parseFloat(distance.toFixed(2)), // Distance in km
+        location: helper.location,
+        distance: parseFloat(distance.toFixed(2)),
+        travelTime: duration ? Math.round(duration) : null,
+        distanceType: googleDistances ? "road" : "straight-line",
       });
     }
 
@@ -654,6 +728,7 @@ const getNearbyHelpers = async (req, res) => {
     console.log("\n SEARCH SUMMARY:");
     console.log(`   Total helpers in DB: ${debugInfo.totalHelpers}`);
     console.log(`   Processed: ${debugInfo.processedHelpers}`);
+    console.log(`   Using: ${debugInfo.usingGoogleMaps ? "🗺️  Google Maps API (road distance)" : "📏 Haversine formula (straight-line)"}`);
     console.log(`   Skipped (no address): ${debugInfo.skippedNoAddress}`);
     console.log(`   Skipped (invalid coords): ${debugInfo.skippedInvalidCoords}`);
     console.log(`   Skipped (out of radius): ${debugInfo.skippedOutOfRadius}`);
