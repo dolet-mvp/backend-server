@@ -400,10 +400,10 @@ const verifyOTPAndStartTask = async (req, res) => {
     }
 
     // Check if task is in correct status
-    if (task.status !== "assigned") {
+    if (task.status !== "arrived") {
       return res.status(400).json({
         success: false,
-        message: "Task is not in assigned status",
+        message: "Task is not in arrived status",
       });
     }
 

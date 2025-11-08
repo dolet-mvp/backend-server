@@ -59,6 +59,8 @@ const Task = sequelize.define(
         "published",
         "in_queue",
         "assigned",
+        "on_the_way",
+        "arrived",
         "in_progress", 
         "completed",
         "cancelled",

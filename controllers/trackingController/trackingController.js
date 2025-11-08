@@ -1,4 +1,3 @@
-const TaskTracking = require("../../models/trackingModel/trackingModel");
 const Task = require("../../models/taskModel/taskModel");
 const Notification = require("../../models/notificationModel/notificationModel");
 const Helper = require("../../models/authModel/helperModel");
@@ -36,19 +35,9 @@ const updateOnTheWay = async (req, res) => {
       });
     }
 
-    // Find or create tracking record for this task
-    const [tracking, created] = await TaskTracking.findOrCreate({
-      where: { taskId, helperId },
-      defaults: {
-        status: "on_the_way",
-      },
-    });
-
-    // If already exists, update the status
-    if (!created) {
-      tracking.status = "on_the_way";
-      await tracking.save();
-    }
+    // Update task status to on_the_way
+    task.status = "on_the_way";
+    await task.save();
 
     // Notify helpseeker
     await Notification.create({
@@ -64,7 +53,11 @@ const updateOnTheWay = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Status updated to on the way",
-      data: tracking,
+      data: {
+        taskId: task.id,
+        status: task.status,
+        title: task.title,
+      },
     });
   } catch (error) {
     console.error("Update on the way error:", error);
@@ -93,21 +86,9 @@ const markArrived = async (req, res) => {
       });
     }
 
-    // Find or create tracking record for this task
-    const [tracking, created] = await TaskTracking.findOrCreate({
-      where: { taskId, helperId },
-      defaults: {
-        status: "arrived",
-        actualArrival: new Date(),
-      },
-    });
-
-    // If already exists, update the status and arrival time
-    if (!created) {
-      tracking.status = "arrived";
-      tracking.actualArrival = new Date();
-      await tracking.save();
-    }
+    // Update task status to arrived
+    task.status = "arrived";
+    await task.save();
 
     // Notify helpseeker
     await Notification.create({
@@ -123,7 +104,11 @@ const markArrived = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Marked as arrived",
-      data: tracking,
+      data: {
+        taskId: task.id,
+        status: task.status,
+        title: task.title,
+      },
     });
   } catch (error) {
     console.error("Mark arrived error:", error);
@@ -166,24 +151,6 @@ const completeWork = async (req, res) => {
       ? Math.floor((workEndTime - new Date(task.startedAt)) / 60000)
       : 0;
 
-    // Find or create tracking record for this task
-    const [tracking, created] = await TaskTracking.findOrCreate({
-      where: { taskId, helperId },
-      defaults: {
-        status: "work_completed",
-        workEndTime,
-        totalWorkDuration: workDuration,
-      },
-    });
-
-    // If already exists, update the status and completion details
-    if (!created) {
-      tracking.status = "work_completed";
-      tracking.workEndTime = workEndTime;
-      tracking.totalWorkDuration = workDuration;
-      await tracking.save();
-    }
-
     // Mark task as completed
     task.status = "completed";
     task.completedAt = new Date();
@@ -204,7 +171,6 @@ const completeWork = async (req, res) => {
       success: true,
       message: "Task completed successfully",
       data: { 
-        tracking, 
         task: {
           id: task.id,
           title: task.title,
@@ -247,21 +213,21 @@ const getTaskTracking = async (req, res) => {
       });
     }
 
-    // Get the tracking record for this task (should be only one now)
-    const tracking = await TaskTracking.findOne({
-      where: { taskId },
-      include: [
-        {
-          model: Helper,
-          as: "helper",
-          attributes: ["id", "fullName", "profilePhoto", "phone"],
-        },
-      ],
-    });
+    // Return task status and helper info
+    const helper = task.assignedHelperId ? await Helper.findByPk(task.assignedHelperId, {
+      attributes: ["id", "fullName", "profilePhoto", "phone"],
+    }) : null;
 
     res.status(200).json({
       success: true,
-      data: tracking,
+      data: {
+        taskId: task.id,
+        title: task.title,
+        status: task.status,
+        startedAt: task.startedAt,
+        completedAt: task.completedAt,
+        helper: helper,
+      },
     });
   } catch (error) {
     console.error("Get tracking error:", error);
@@ -278,7 +244,7 @@ const updateLocation = async (req, res) => {
   try {
     const helperId = req.user.id;
     const { taskId } = req.params;
-    const { currentLocation } = req.body;
+    const { latitude, longitude } = req.body;
 
     const task = await Task.findOne({
       where: { id: taskId, assignedHelperId: helperId },
@@ -291,27 +257,28 @@ const updateLocation = async (req, res) => {
       });
     }
 
-    // Get latest tracking entry
-    const latestTracking = await TaskTracking.findOne({
-      where: { taskId, helperId },
-      order: [["createdAt", "DESC"]],
+    // Store current location in task's location field
+    const currentLocation = task.location || {};
+    currentLocation.helperCurrentLat = latitude;
+    currentLocation.helperCurrentLng = longitude;
+    currentLocation.lastUpdated = new Date();
+    
+    task.location = currentLocation;
+    task.changed('location', true); // Force Sequelize to recognize JSON change
+    await task.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Location updated successfully",
+      data: {
+        taskId: task.id,
+        currentLocation: {
+          latitude,
+          longitude,
+          lastUpdated: currentLocation.lastUpdated,
+        },
+      },
     });
-
-    if (latestTracking) {
-      latestTracking.currentLocation = currentLocation;
-      await latestTracking.save();
-
-      res.status(200).json({
-        success: true,
-        message: "Location updated",
-        data: latestTracking,
-      });
-    } else {
-      res.status(404).json({
-        success: false,
-        message: "No active tracking found",
-      });
-    }
   } catch (error) {
     console.error("Update location error:", error);
     res.status(500).json({

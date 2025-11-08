@@ -142,7 +142,6 @@ app.get("/api/health", (req, res) => {
 initDB(() => {
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
-  
     initTaskScheduler();
     console.log(' Task scheduler initialized');
   });
