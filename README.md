@@ -681,8 +681,30 @@ Helpseekers can schedule their tasks to be automatically published at a specific
 
 **Requirements:**
 - Task must be in `draft` status
-- Scheduled time must be in the future
+- Scheduled time must be in the future (UTC)
 - Only task creator can schedule
+
+**⚠️ IMPORTANT: Timezone Handling**
+- The server operates in **UTC** timezone
+- All timestamps should be sent in **ISO 8601 UTC format** (ending with 'Z')
+- Example: `"2025-11-08T05:15:00.000Z"` (5:15 AM UTC = 10:45 AM IST)
+
+**Converting IST to UTC (Frontend):**
+```javascript
+// Option 1: Create date in IST and convert to UTC
+const istDate = new Date('2025-11-08T10:45:00+05:30'); // 10:45 AM IST
+const utcString = istDate.toISOString(); // "2025-11-08T05:15:00.000Z"
+
+// Option 2: Manually subtract 5.5 hours
+const istTime = new Date('2025-11-08T10:45:00'); // Local IST
+istTime.setHours(istTime.getHours() - 5);
+istTime.setMinutes(istTime.getMinutes() - 30);
+const utcString = istTime.toISOString();
+
+// Option 3: Use moment-timezone or date-fns-tz
+import moment from 'moment-timezone';
+const utcString = moment.tz('2025-11-08 10:45', 'Asia/Kolkata').toISOString();
+```
 
 **Request Body:**
 ```json
@@ -695,15 +717,24 @@ Helpseekers can schedule their tasks to be automatically published at a specific
 ```json
 {
   "success": true,
-  "message": "Task scheduled for publishing",
+  "message": "Task scheduled for publishing successfully",
   "data": {
-    "id": "task-uuid",
-    "title": "Help with moving",
-    "status": "draft",
-    "isScheduled": true,
-    "scheduledPublishAt": "2025-10-25T15:30:00Z"
+    "task": {
+      "id": "task-uuid",
+      "title": "Help with moving",
+      "status": "draft",
+      "isScheduled": true,
+      "scheduledPublishAt": "2025-10-25T15:30:00.000Z",
+      "scheduledPublishAtIST": "10/25/2025, 9:00:00 PM"
+    }
   }
 }
+```
+
+**Notes:**
+- Response includes both UTC and IST formatted times for verification
+- Scheduler logs show both UTC and IST times for debugging
+- If scheduled time is in the past, returns 400 error with current UTC time
 ```
 
 #### Cancel Scheduled Publishing

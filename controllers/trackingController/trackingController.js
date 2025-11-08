@@ -36,11 +36,19 @@ const updateOnTheWay = async (req, res) => {
       });
     }
 
-    const tracking = await TaskTracking.create({
-      taskId,
-      helperId,
-      status: "on_the_way",
+    // Find or create tracking record for this task
+    const [tracking, created] = await TaskTracking.findOrCreate({
+      where: { taskId, helperId },
+      defaults: {
+        status: "on_the_way",
+      },
     });
+
+    // If already exists, update the status
+    if (!created) {
+      tracking.status = "on_the_way";
+      await tracking.save();
+    }
 
     // Notify helpseeker
     await Notification.create({
@@ -85,12 +93,21 @@ const markArrived = async (req, res) => {
       });
     }
 
-    const tracking = await TaskTracking.create({
-      taskId,
-      helperId,
-      status: "arrived",
-      actualArrival: new Date(),
+    // Find or create tracking record for this task
+    const [tracking, created] = await TaskTracking.findOrCreate({
+      where: { taskId, helperId },
+      defaults: {
+        status: "arrived",
+        actualArrival: new Date(),
+      },
     });
+
+    // If already exists, update the status and arrival time
+    if (!created) {
+      tracking.status = "arrived";
+      tracking.actualArrival = new Date();
+      await tracking.save();
+    }
 
     // Notify helpseeker
     await Notification.create({
@@ -149,14 +166,23 @@ const completeWork = async (req, res) => {
       ? Math.floor((workEndTime - new Date(task.startedAt)) / 60000)
       : 0;
 
-    // Create tracking record
-    const tracking = await TaskTracking.create({
-      taskId,
-      helperId,
-      status: "work_completed",
-      workEndTime,
-      totalWorkDuration: workDuration,
+    // Find or create tracking record for this task
+    const [tracking, created] = await TaskTracking.findOrCreate({
+      where: { taskId, helperId },
+      defaults: {
+        status: "work_completed",
+        workEndTime,
+        totalWorkDuration: workDuration,
+      },
     });
+
+    // If already exists, update the status and completion details
+    if (!created) {
+      tracking.status = "work_completed";
+      tracking.workEndTime = workEndTime;
+      tracking.totalWorkDuration = workDuration;
+      await tracking.save();
+    }
 
     // Mark task as completed
     task.status = "completed";
@@ -214,16 +240,16 @@ const getTaskTracking = async (req, res) => {
     }
 
     // Verify user is either task creator or assigned helper
-    if (task.userId !== userId && task.assignedHelperId !== userId) {
+    if (task.helpseekerId !== userId && task.assignedHelperId !== userId) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized to view tracking",
       });
     }
 
-    const tracking = await TaskTracking.findAll({
+    // Get the tracking record for this task (should be only one now)
+    const tracking = await TaskTracking.findOne({
       where: { taskId },
-      order: [["createdAt", "ASC"]],
       include: [
         {
           model: Helper,

@@ -254,21 +254,40 @@ const scheduleTaskPublish = async (req, res) => {
       });
     }
 
-    const scheduledDate = new Date(scheduledPublishAt);
+    // Parse the received time as IST and convert to UTC
+    const receivedTime = scheduledPublishAt;
+    
+    // Create date object from received time (assumes IST input)
+    const istDate = new Date(receivedTime);
+    
+    // Subtract 5 hours 30 minutes to convert IST to UTC
+    const utcDate = new Date(istDate.getTime() - (5 * 60 + 30) * 60 * 1000);
+    
     const currentDate = new Date();
 
+    console.log(`\n⏰ Scheduling task "${task.title}":`);
+    console.log(`   Received time (IST): ${receivedTime}`);
+    console.log(`   Received as Date: ${istDate.toISOString()}`);
+    console.log(`   Converted to UTC: ${utcDate.toISOString()}`);
+    console.log(`   Converted to IST display: ${utcDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
+    console.log(`   Current time (UTC): ${currentDate.toISOString()}`);
+    console.log(`   Current time (IST): ${currentDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
+
     // Validate that scheduled date is in the future
-    if (scheduledDate <= currentDate) {
+    if (utcDate <= currentDate) {
       return res.status(400).json({
         success: false,
-        message: "Scheduled publish time must be in the future",
+        message: `Scheduled publish time must be in the future. Current time (IST): ${currentDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}, Scheduled (IST): ${utcDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
       });
     }
 
     // Update task with schedule information
-    task.scheduledPublishAt = scheduledDate;
+    task.scheduledPublishAt = utcDate;
     task.isScheduled = true;
     await task.save();
+
+    console.log(`   ✅ Task scheduled successfully for UTC: ${utcDate.toISOString()}`);
+    console.log(`   ✅ Will publish at IST: ${utcDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
 
     res.status(200).json({
       success: true,
@@ -280,6 +299,7 @@ const scheduleTaskPublish = async (req, res) => {
           status: task.status,
           isScheduled: task.isScheduled,
           scheduledPublishAt: task.scheduledPublishAt,
+          scheduledPublishAtIST: new Date(task.scheduledPublishAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
         },
       },
     });
