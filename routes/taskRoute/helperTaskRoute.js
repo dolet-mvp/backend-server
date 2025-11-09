@@ -6,6 +6,8 @@ const {
   acceptTask,
   rejectTask,
   verifyOTPAndStartTask,
+  getMyAcceptedTasks,
+  getMyTaskDetails,
 } = require("../../controllers/taskController/helperTaskController");
 
 const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
@@ -40,6 +42,22 @@ router.post(
   checkForAuthenticationCookie(),
   checkUserType(["helper", "helpseeker"]),
   verifyOTPAndStartTask
+);
+
+// Get all accepted tasks for helper
+router.get(
+  "/helper/my-tasks",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  getMyAcceptedTasks
+);
+
+// Get single task details for helper
+router.get(
+  "/helper/my-tasks/:taskId",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  getMyTaskDetails
 );
 
 module.exports = router;

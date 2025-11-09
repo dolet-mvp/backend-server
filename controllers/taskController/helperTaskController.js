@@ -483,9 +483,97 @@ const verifyOTPAndStartTask = async (req, res) => {
   }
 };
 
+// Get all accepted tasks for helper
+const getMyAcceptedTasks = async (req, res) => {
+  try {
+    const helperId = req.user.id;
+
+    const tasks = await Task.findAll({
+      where: {
+        assignedHelperId: helperId,
+      },
+      include: [
+        {
+          model: Helpseeker,
+          as: "creator",
+          attributes: ["id", "fullName", "profilePhoto", "phone", "email"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Accepted tasks retrieved successfully",
+      data: tasks,
+      meta: {
+        total: tasks.length,
+      },
+    });
+  } catch (error) {
+    console.error("Get accepted tasks error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get accepted tasks",
+      error: error.message,
+    });
+  }
+};
+
+// Get single task details for helper
+const getMyTaskDetails = async (req, res) => {
+  try {
+    const helperId = req.user.id;
+    const { taskId } = req.params;
+
+    const task = await Task.findOne({
+      where: {
+        id: taskId,
+        assignedHelperId: helperId,
+      },
+      include: [
+        {
+          model: Helpseeker,
+          as: "creator",
+          attributes: ["id", "fullName", "profilePhoto", "phone", "email"],
+          include: [
+            {
+              model: Address,
+              as: "addresses",
+              attributes: ["id", "addressLine1", "addressLine2", "city", "state", "latitude", "longitude"],
+            },
+          ],
+        },
+      ],
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found or not assigned to you",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Task details retrieved successfully",
+      data: task,
+    });
+  } catch (error) {
+    console.error("Get task details error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get task details",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAvailableTasks,
   acceptTask,
   rejectTask,
   verifyOTPAndStartTask,
+  getMyAcceptedTasks,
+  getMyTaskDetails,
 };

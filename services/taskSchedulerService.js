@@ -27,7 +27,7 @@ const publishScheduledTask = async (task) => {
       queuePosition: queueCount + 1,
       priority: task.priority === "urgent" ? 10 : task.priority === "high" ? 5 : 0,
     });
-    console.log(`   ✅ Added to queue at position: ${queueEntry.queuePosition}`);
+    console.log(`    Added to queue at position: ${queueEntry.queuePosition}`);
 
     // Notify available helpers
     const helpers = await Helper.findAll({
