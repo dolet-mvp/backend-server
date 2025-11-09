@@ -44,7 +44,6 @@ router.post(
   verifyOTPAndStartTask
 );
 
-// Get all accepted tasks for helper
 router.get(
   "/helper/my-tasks",
   checkForAuthenticationCookie(),
@@ -52,7 +51,7 @@ router.get(
   getMyAcceptedTasks
 );
 
-// Get single task details for helper
+
 router.get(
   "/helper/my-tasks/:taskId",
   checkForAuthenticationCookie(),
