@@ -17,7 +17,9 @@ const createAddress = async (req, res) => {
       longitude, 
       type, 
       isDefault,
-      tag
+      tag,
+      house,
+      street
     } = req.body;
 
     if (!['helper', 'helpseeker'].includes(userType)) {
@@ -59,7 +61,9 @@ const createAddress = async (req, res) => {
       type: type || "home",
       isDefault: isDefault || false,
       userType,
-      tag
+      tag,
+      house,
+      street
     };
 
     // Set the appropriate foreign key
@@ -202,7 +206,9 @@ const updateAddress = async (req, res) => {
       longitude, 
       type, 
       isDefault,
-      tag
+      tag,
+      house,
+      street
     } = req.body;
 
     // Build where clause
@@ -262,7 +268,9 @@ const updateAddress = async (req, res) => {
       longitude: longitude !== undefined ? longitude : address.longitude,
       type: type || address.type,
       isDefault: isDefault !== undefined ? isDefault : address.isDefault,
-      tag: tag !== undefined ? tag : address.tag
+      tag: tag !== undefined ? tag : address.tag,
+      house: house !== undefined ? house : address.house,
+      street: street !== undefined ? street : address.street
     });
 
     res.status(200).json({

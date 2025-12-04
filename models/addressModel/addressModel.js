@@ -37,6 +37,14 @@ const Address = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+      house: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+      street: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     addressLine2: {
       type: DataTypes.STRING,
       allowNull: true,
