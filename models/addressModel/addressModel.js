@@ -33,6 +33,10 @@ const Address = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+     tag: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     addressLine2: {
       type: DataTypes.STRING,
       allowNull: true,
