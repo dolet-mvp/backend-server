@@ -67,7 +67,7 @@ const toggleAvailability = async (req, res) => {
         {
           model: Address,
           as: "addresses",
-          attributes: ["id", "street", "city", "state", "zipCode", "country", "latitude", "longitude", "isDefault"],
+          attributes: ["id", "street", "city", "state", "latitude", "longitude", "isDefault"],
         },
       ],
     });

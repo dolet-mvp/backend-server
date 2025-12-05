@@ -6,6 +6,7 @@ const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Address = require("../../models/addressModel/addressModel");
 const axios = require("axios");
 const jobMatchingService = require("../../services/jobMatchingService");
+const redis = require("../../config/redis/redis");
 
 
 const generateOTP = () => {
@@ -194,7 +195,39 @@ const publishTask = async (req, res) => {
       priority: task.priority === "urgent" ? 10 : task.priority === "high" ? 5 : 0,
     });
 
-    // Start intelligent job matching if task has location
+    // Store the published job in Redis
+    try {
+      const jobData = {
+        taskId: task.id,
+        helpseekerId: helpseekerId,
+        title: task.title,
+        description: task.description,
+        category: task.category,
+        budget: task.budget,
+        estimatedDuration: task.estimatedDuration,
+        priority: task.priority,
+        locationRequired: task.locationRequired,
+        location: task.location,
+        status: task.status,
+        queuePosition: queueEntry.queuePosition,
+        steps : task.steps,
+        publishedAt: new Date().toISOString(),
+      };
+      
+   
+      await redis.setex(`job:${task.id}`, 2592000, JSON.stringify(jobData));
+      
+      await redis.zadd('jobs:published', {
+        score: Date.now(),
+        member: `job:${task.id}`,
+      });
+      
+      console.log(`✅ Job ${task.id} stored in Redis successfully`);
+    } catch (redisError) {
+      console.error(`⚠️ Failed to store job in Redis:`, redisError);
+      // Continue execution even if Redis fails
+    }
+
     if (task.locationRequired && task.location && task.location.lat && task.location.lng) {
       // Trigger job matching service asynchronously (non-blocking)
       jobMatchingService.startJobMatching({
