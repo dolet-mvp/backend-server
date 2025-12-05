@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const {
+  getAvailabilityStatus,
   toggleAvailability,
   getHelperCompletedTasks,
   getHelperActiveTasks,
@@ -9,8 +10,15 @@ const {
 const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
 
 
+// Get availability status
+router.get(
+  "/availability",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  getAvailabilityStatus
+);
 
-
+// Toggle availability
 router.patch(
   "/availability",
   checkForAuthenticationCookie(),

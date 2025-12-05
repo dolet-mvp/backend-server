@@ -5,6 +5,7 @@ const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Address = require("../../models/addressModel/addressModel");
 const axios = require("axios");
+const jobMatchingService = require("../../services/jobMatchingService");
 
 
 const generateOTP = () => {
@@ -193,22 +194,39 @@ const publishTask = async (req, res) => {
       priority: task.priority === "urgent" ? 10 : task.priority === "high" ? 5 : 0,
     });
 
-    // Notify available helpers
-    const helpers = await Helper.findAll({
-      where: { verificationStatus: "approved", isApproved: true },
-    });
+    // Start intelligent job matching if task has location
+    if (task.locationRequired && task.location && task.location.lat && task.location.lng) {
+      // Trigger job matching service asynchronously (non-blocking)
+      jobMatchingService.startJobMatching({
+        taskId: task.id,
+        userId: helpseekerId,
+        title: task.title,
+        description: task.description,
+        budget: task.budget,
+        category: task.category,
+        latitude: task.location.lat,
+        longitude: task.location.lng,
+      }).catch(err => {
+        console.error(`Job matching failed for task ${task.id}:`, err);
+      });
+    } else {
+      // For non-location tasks, notify all approved helpers (fallback)
+      const helpers = await Helper.findAll({
+        where: { verificationStatus: "approved", isApproved: true },
+      });
 
-    const notifications = helpers.map((helper) => ({
-      helperId: helper.id,
-      userType: 'helper',
-      taskId: task.id,
-      title: "New Task Available",
-      message: `New task: ${task.title}`,
-      type: "task_created",
-      priority: task.priority,
-    }));
+      const notifications = helpers.map((helper) => ({
+        helperId: helper.id,
+        userType: 'helper',
+        taskId: task.id,
+        title: "New Task Available",
+        message: `New task: ${task.title}`,
+        type: "task_created",
+        priority: task.priority,
+      }));
 
-    await Notification.bulkCreate(notifications);
+      await Notification.bulkCreate(notifications);
+    }
 
     res.status(200).json({
       success: true,

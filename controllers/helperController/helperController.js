@@ -2,14 +2,75 @@ const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Task = require("../../models/taskModel/taskModel");
 const Rating = require("../../models/ratingModel/ratingModel");
+const Address = require("../../models/addressModel/addressModel");
+const redis = require("../../config/redis/redis");
 
+
+// Get helper availability status
+const getAvailabilityStatus = async (req, res) => {
+  try {
+    const helperId = req.user.id;
+
+    // Check Redis first for online status
+    const cachedHelper = await redis.get(`helper:online:${helperId}`);
+    
+    if (cachedHelper) {
+      const helperData = JSON.parse(cachedHelper);
+      return res.status(200).json({
+        success: true,
+        message: "Availability status retrieved successfully",
+        data: {
+          isAvailable: true,
+          status: "online",
+          onlineAt: helperData.onlineAt,
+        },
+      });
+    }
+
+    // If not in Redis, check database
+    const helper = await Helper.findByPk(helperId, {
+      attributes: ["id", "fullName", "isAvailable"],
+    });
+
+    if (!helper) {
+      return res.status(404).json({
+        success: false,
+        message: "Helper not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Availability status retrieved successfully",
+      data: {
+        isAvailable: helper.isAvailable,
+        status: helper.isAvailable ? "online" : "offline",
+      },
+    });
+  } catch (error) {
+    console.error("Get availability status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get availability status",
+      error: error.message,
+    });
+  }
+};
 
 // Toggle helper availability
 const toggleAvailability = async (req, res) => {
   try {
     const helperId = req.user.id;
 
-    const helper = await Helper.findByPk(helperId);
+    const helper = await Helper.findByPk(helperId, {
+      include: [
+        {
+          model: Address,
+          as: "addresses",
+          attributes: ["id", "street", "city", "state", "zipCode", "country", "latitude", "longitude", "isDefault"],
+        },
+      ],
+    });
 
     if (!helper) {
       return res.status(404).json({
@@ -21,6 +82,29 @@ const toggleAvailability = async (req, res) => {
     // Toggle availability
     helper.isAvailable = !helper.isAvailable;
     await helper.save();
+
+    // If helper goes online, store in Redis
+    if (helper.isAvailable) {
+      const helperData = {
+        id: helper.id,
+        fullName: helper.fullName,
+        email: helper.email,
+        phone: helper.phone,
+        profilePhoto: helper.profilePhoto,
+        isAvailable: helper.isAvailable,
+        averageRating: helper.averageRating,
+        completedTasks: helper.completedTasks,
+        addresses: helper.addresses,
+        onlineAt: new Date().toISOString(),
+      };
+
+      await redis.set(`helper:online:${helper.id}`, JSON.stringify(helperData));
+      // Optional: Set expiration (e.g., 12 hours = 43200 seconds)
+      await redis.expire(`helper:online:${helper.id}`, 43200);
+    } else {
+      // If helper goes offline, remove from Redis
+      await redis.del(`helper:online:${helper.id}`);
+    }
 
     res.status(200).json({
       success: true,
@@ -139,6 +223,7 @@ const getAvailableHelpersCount = async (req, res) => {
 };
 
 module.exports = {
+  getAvailabilityStatus,
   toggleAvailability,
   getHelperCompletedTasks,
   getHelperActiveTasks,

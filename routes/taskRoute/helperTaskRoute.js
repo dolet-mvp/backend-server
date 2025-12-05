@@ -5,6 +5,7 @@ const {
   getAvailableTasks,
   acceptTask,
   rejectTask,
+  passTask,
   verifyOTPAndStartTask,
   getMyAcceptedTasks,
   getMyTaskDetails,
@@ -34,6 +35,14 @@ router.post(
   checkForAuthenticationCookie(),
   checkUserType(["helper", "helpseeker"]),
   rejectTask
+);
+
+// Pass on a task (skip without explicit rejection)
+router.post(
+  "/:taskId/pass",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  passTask
 );
 
 // Verify OTP and start task
