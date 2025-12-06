@@ -118,68 +118,61 @@ const getAvailableTasks = async (req, res) => {
     
     const radius = process.env.TASK_SEARCH_RADIUS || 50;
 
-    // Check if helper is available/online from Redis first
+    // Check if helper is available/online from Redis - NO DATABASE FALLBACK
     if (helperId) {
       const cachedHelper = await redis.get(`helper:online:${helperId}`);
       
       if (!cachedHelper) {
-        // If not in Redis, check database
-        const helper = await Helper.findByPk(helperId);
-
-        if (!helper || !helper.isAvailable || helper.verificationStatus !== 'approved') {
-          return res.status(200).json({
-            success: true,
-            message: "You are currently offline or not approved. Please go online to see available tasks.",
-            data: [],
-            meta: {
-              isHelperAvailable: helper?.isAvailable || false,
-              helperStatus: helper?.verificationStatus || "unknown",
-            },
-          });
-        }
+        // If not in Redis, reject the request - helper must be online
+        return res.status(403).json({
+          success: false,
+          message: "You must be online to view available tasks. Please toggle your availability status to 'online' first.",
+          data: [],
+          meta: {
+            isHelperAvailable: false,
+            helperStatus: "offline",
+            requiresAction: "Go online using the availability toggle",
+          },
+        });
       }
     }
 
     let helperLat, helperLng;
     let helperAddress = null;
 
-    // Check Redis for helper data first
+    // Get helper data from Redis only - NO DATABASE FALLBACK
     if (helperId) {
       const cachedHelper = await redis.get(`helper:online:${helperId}`);
       
-      if (cachedHelper) {
-        const helperData = JSON.parse(cachedHelper);
-        
-        // Get address from cached helper data
-        if (helperData.addresses && helperData.addresses.length > 0) {
-          // Find default address or use first address
-          helperAddress = helperData.addresses.find(addr => addr.isDefault) || helperData.addresses[0];
-          
-          if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
-            helperLat = parseFloat(helperAddress.latitude);
-            helperLng = parseFloat(helperAddress.longitude);
-          }
-        }
-      }
-      
-      // If not found in Redis, fetch from database
-      if (!helperAddress) {
-        helperAddress = await Address.findOne({
-          where: { helperId: helperId, userType: 'helper' },
-          attributes: ['id', 'street', 'city', 'state', 'zipCode', 'country', 'latitude', 'longitude', 'isDefault'],
-          order: [['createdAt', 'DESC']], // Get most recent address
+      if (!cachedHelper) {
+        return res.status(403).json({
+          success: false,
+          message: "You must be online to view available tasks.",
         });
+      }
 
-        // If address found with coordinates, use them
+      // Handle both string and object responses from Upstash Redis
+      const helperData = typeof cachedHelper === 'string' ? JSON.parse(cachedHelper) : cachedHelper;
+      
+      // Get address from cached helper data
+      if (helperData.addresses && helperData.addresses.length > 0) {
+        // Find default address or use first address
+        helperAddress = helperData.addresses.find(addr => addr.isDefault) || helperData.addresses[0];
+        
         if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
           helperLat = parseFloat(helperAddress.latitude);
           helperLng = parseFloat(helperAddress.longitude);
         } else {
           return res.status(400).json({
             success: false,
-            message: "Please add your address with location coordinates in your profile to see available tasks",
+            message: "Please add your address with location coordinates in your profile to see available tasks.",
           });
         }
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Please add your address with location coordinates in your profile to see available tasks.",
+        });
       }
     } else {
       return res.status(401).json({
@@ -205,40 +198,49 @@ const getAvailableTasks = async (req, res) => {
       });
     }
 
-    const whereClause = { status: "in_queue" };
-    
-    // First, try to get tasks from Redis
-    const redisKeys = await redis.keys('task:*');
+    // Get tasks from Redis ONLY - NO DATABASE FALLBACK
+    console.log("📡 Fetching tasks from Redis only...");
+    const redisKeys = await redis.keys('job:*');
     let tasksFromRedis = [];
     
-    if (redisKeys && redisKeys.length > 0) {
-      const redisPromises = redisKeys.map(key => redis.get(key));
-      const redisResults = await Promise.all(redisPromises);
-      tasksFromRedis = redisResults
-        .filter(result => result)
-        .map(result => JSON.parse(result))
-        .filter(task => task.status === 'in_queue');
+    if (!redisKeys || redisKeys.length === 0) {
+      console.log("ℹ️  No tasks found in Redis");
+      return res.status(200).json({
+        success: true,
+        message: "No tasks available at the moment",
+        data: [],
+        meta: {
+          isHelperAvailable: true,
+          helperStatus: "online",
+          helperLocation: { 
+            lat: helperLat, 
+            lng: helperLng,
+          },
+          searchRadius: searchRadius,
+          totalTasks: 0,
+          nearbyTasks: 0,
+          source: "redis_only",
+        },
+      });
     }
+    
+    const redisPromises = redisKeys.map(key => redis.get(key));
+    const redisResults = await Promise.all(redisPromises);
+    tasksFromRedis = redisResults
+      .filter(result => result)
+      .map(result => {
+        // Handle both string and object responses from Upstash Redis
+        if (typeof result === 'string') {
+          return JSON.parse(result);
+        }
+        return result;
+      })
+      .filter(task => task.status === 'in_queue');
 
-    // Get all tasks in queue from database as fallback
-    const tasks = await Task.findAll({
-      where: whereClause,
-      include: [
-        {
-          model: TaskQueue,
-          as: "queueStatus",
-        },
-        {
-          model: Helpseeker,
-          as: "creator",
-          attributes: ["id", "fullName", "profilePhoto","phone"],
-        },
-      ],
-      order: [["createdAt", "DESC"]],
-    });
+    console.log(`✅ Found ${tasksFromRedis.length} tasks in Redis with status 'in_queue'`);
 
-    // Use Redis tasks if available, otherwise use database tasks
-    const tasksToProcess = tasksFromRedis.length > 0 ? tasksFromRedis : tasks;
+    // Use Redis tasks only
+    const tasksToProcess = tasksFromRedis;
 
     // Filter out tasks this helper has already rejected or passed
     const availableTasksForHelper = [];
@@ -351,13 +353,13 @@ const getAvailableTasks = async (req, res) => {
             country: helperAddress.country,
             isDefault: helperAddress.isDefault,
           } : null,
-          source: 'redis_or_address_model'
+          source: 'redis_only'
         },
         searchRadius: searchRadius,
-        totalTasks: tasks.length,
+        totalTasksInRedis: tasksFromRedis.length,
         nearbyTasks: nearbyTasks.length,
-        redisTasksCount: tasksFromRedis.length,
         filteredByHelperActions: tasksToProcess.length - availableTasksForHelper.length,
+        dataSource: "redis_only",
       },
     });
   } catch (error) {
