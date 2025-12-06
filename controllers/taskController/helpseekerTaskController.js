@@ -324,33 +324,48 @@ const scheduleTaskPublish = async (req, res) => {
     console.log(`   Current time (UTC): ${currentDate.toISOString()}`);
     console.log(`   Current time (IST): ${currentDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
 
-    // Validate that scheduled date is in the future
-    if (utcDate <= currentDate) {
+    // Validate that scheduled date is in the future (must be at least 1 hour ahead)
+    // Add 1 hour buffer to current time since we publish 1 hour early
+    const minimumScheduleTime = new Date(currentDate.getTime() + 60 * 60 * 1000);
+    
+    if (utcDate <= minimumScheduleTime) {
       return res.status(400).json({
         success: false,
-        message: `Scheduled publish time must be in the future. Current time (IST): ${currentDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}, Scheduled (IST): ${utcDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+        message: `Scheduled publish time must be at least 1 hour in the future. Current time (IST): ${currentDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}, Minimum schedule time (IST): ${minimumScheduleTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
       });
     }
 
+    // Calculate actual publish time (1 hour before scheduled time)
+    const actualPublishTime = new Date(utcDate.getTime() - 60 * 60 * 1000);
+    
+    console.log(`   📋 Schedule details:`);
+    console.log(`      User requested schedule (IST): ${utcDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
+    console.log(`      Actual publish time (IST): ${actualPublishTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} (1 hour before)`);
+    console.log(`      Actual publish time (UTC): ${actualPublishTime.toISOString()}`);
+
     // Update task with schedule information
-    task.scheduledPublishAt = utcDate;
+    // Store the actual publish time (1 hour before user's requested time)
+    task.scheduledPublishAt = actualPublishTime;
     task.isScheduled = true;
     await task.save();
 
-    console.log(`   ✅ Task scheduled successfully for UTC: ${utcDate.toISOString()}`);
-    console.log(`   ✅ Will publish at IST: ${utcDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
+    console.log(`   ✅ Task scheduled successfully!`);
+    console.log(`   ✅ Will be published 1 hour before the requested time`);
 
     res.status(200).json({
       success: true,
-      message: "Task scheduled for publishing successfully",
+      message: "Task scheduled for publishing successfully. Note: The task will be published 1 hour before the scheduled time to ensure timely delivery.",
       data: {
         task: {
           id: task.id,
           title: task.title,
           status: task.status,
           isScheduled: task.isScheduled,
-          scheduledPublishAt: task.scheduledPublishAt,
-          scheduledPublishAtIST: new Date(task.scheduledPublishAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+          requestedScheduleTime: utcDate,
+          requestedScheduleTimeIST: utcDate.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+          actualPublishTime: task.scheduledPublishAt,
+          actualPublishTimeIST: new Date(task.scheduledPublishAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+          publishedEarly: "1 hour before scheduled time"
         },
       },
     });

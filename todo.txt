@@ -1,5 +1,3 @@
-nsfw implementation
-schedule publish implementation
 check previous implementation of redis
 socket implementation + frontend also 
 push notification from firebase on app
