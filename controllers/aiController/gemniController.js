@@ -255,8 +255,64 @@ const generateTaskJson = async (req, res) => {
     
     console.log(`✅ User description received: "${userDescription.substring(0, 50)}..."`);
 
+    // NSFW Content Check
+    console.log('🔍 [STEP 4] Checking for inappropriate content...');
+    const nsfwCheckPrompt = `
+You are a content moderation system. Analyze the following user description and determine if it contains any inappropriate, NSFW (Not Safe For Work), sexually explicit, illegal, violent, or otherwise harmful content.
+
+User description:
+"${userDescription}"
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "isAppropriate": true/false,
+  "reason": "Brief explanation if inappropriate, or 'Content is appropriate' if safe"
+}
+
+Do not include any other text or formatting.
+`;
+
+    let nsfwCheckResponse = null;
+    try {
+      nsfwCheckResponse = await generateWithVertexAI(nsfwCheckPrompt);
+      const nsfwCheckText = extractAiText(nsfwCheckResponse);
+      
+      if (nsfwCheckText) {
+        console.log('📄 NSFW check response:', nsfwCheckText);
+        
+        // Parse the NSFW check response
+        let nsfwResult = null;
+        try {
+          // Try direct parse
+          nsfwResult = JSON.parse(nsfwCheckText);
+        } catch (parseErr) {
+          // Try extracting from markdown
+          const match = nsfwCheckText.match(/```json\s*([\s\S]*?)\s*```/) || 
+                        nsfwCheckText.match(/```\s*([\s\S]*?)\s*```/) ||
+                        nsfwCheckText.match(/(\{[\s\S]*\})/);
+          if (match) {
+            nsfwResult = JSON.parse(match[1] || match[0]);
+          }
+        }
+        
+        if (nsfwResult && nsfwResult.isAppropriate === false) {
+          console.warn('⚠️  Inappropriate content detected');
+          return res.status(400).json({
+            success: false,
+            message: "We're sorry, but we cannot process your request. The description contains content that doesn't align with our community guidelines. Please revise your description and try again.",
+            reason: "Content policy violation"
+          });
+        }
+        
+        console.log('✅ Content check passed');
+      }
+    } catch (nsfwErr) {
+      console.warn('⚠️  NSFW check failed, proceeding with caution:', nsfwErr.message);
+      // Continue processing - fail open to avoid blocking legitimate requests if the check fails
+    }
+
     // Build prompt
-    console.log('📝 [STEP 4] Building AI prompt...');
+    console.log('📝 [STEP 5] Building AI prompt...');
     const prompt = `
 User description:
 "${userDescription}"
@@ -288,7 +344,7 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
     console.log('✅ Prompt built successfully');
 
     // Generate content using Vertex AI
-    console.log('🤖 [STEP 5] Calling Vertex AI to generate task...');
+    console.log('🤖 [STEP 6] Calling Vertex AI to generate task...');
     let aiResp = null;
     try {
       aiResp = await generateWithVertexAI(prompt);
@@ -303,7 +359,7 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
     }
 
     // Extract text from response
-    console.log('📄 [STEP 6] Extracting text from AI response...');
+    console.log('📄 [STEP 7] Extracting text from AI response...');
     const aiText = extractAiText(aiResp);
     
     if (!aiText) {
@@ -318,7 +374,7 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
     console.log(`✅ Text extracted (${aiText.length} characters)`);
 
     // Parse JSON from AI response
-    console.log('🔄 [STEP 7] Parsing JSON from AI text...');
+    console.log('🔄 [STEP 8] Parsing JSON from AI text...');
     let taskJson = null;
     
     try {
@@ -352,7 +408,7 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
     }
 
     // Ensure steps is an array
-    console.log('🔍 [STEP 8] Validating task structure...');
+    console.log('🔍 [STEP 9] Validating task structure...');
     if (!Array.isArray(taskJson.steps)) {
       console.warn('⚠️  Steps is not an array, converting to empty array');
       taskJson.steps = [];
@@ -372,7 +428,7 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
       createdAt: new Date()
     });
     
-    console.log('✨ [STEP 9] Sending initial response to client...');
+    console.log('✨ [STEP 10] Sending initial response to client...');
     
     // Send immediate response with taskId
     const response = {
@@ -384,7 +440,7 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
     };
     
     // Trigger background enrichment (don't await)
-    console.log('🔄 [STEP 10] Triggering background location enrichment...');
+    console.log('🔄 [STEP 11] Triggering background location enrichment...');
     enrichLocationsInBackground(taskId, taskJson.steps).catch(err => {
       console.error('❌ Background enrichment failed:', err.message);
     });
