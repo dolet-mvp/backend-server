@@ -64,6 +64,7 @@ const ratingRoutes = require("./routes/ratingRoute/ratingRoute");
 const helperRoutes = require("./routes/helperRoute/helperRoute");
 const notificationRoutes = require("./routes/notificationRoute/notificationRoute");
 const testNotificationRoutes = require("./routes/notificationRoute/testNotificationRoute");
+const diagnosticRoutes = require("./routes/notificationRoute/diagnosticRoute");
 const supportRoutes = require("./routes/supportRoute/supportRoute");
 const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
 const geminiRoutes = require("./routes/aiRoute/gemniRoute");
@@ -125,6 +126,12 @@ app.use(
 app.use(
   "/api/notifications",
   testNotificationRoutes
+);
+
+// Diagnostic routes
+app.use(
+  "/api/notifications",
+  diagnosticRoutes
 );
 
 // Support ticket routes

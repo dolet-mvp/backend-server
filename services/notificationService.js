@@ -64,8 +64,11 @@ const createNotification = async (notificationData) => {
     }
 
     // 1. Save notification to database
+    console.log(`🔵 [NOTIFICATION SERVICE] Creating notification for user ${userId} (${userType})`);
+    console.log(`🔵 [NOTIFICATION SERVICE] Notification data:`, JSON.stringify(dbNotification, null, 2));
+    
     const savedNotification = await Notification.create(dbNotification);
-    console.log(`✅ Notification saved to DB: ${savedNotification.id}`);
+    console.log(`✅ [NOTIFICATION SERVICE] Notification saved to DB: ${savedNotification.id}`);
 
     // Prepare notification payload for real-time and push
     const notificationPayload = {
@@ -79,22 +82,30 @@ const createNotification = async (notificationData) => {
       isRead: savedNotification.isRead,
       createdAt: savedNotification.createdAt,
     };
+    console.log(`📦 [NOTIFICATION SERVICE] Notification payload:`, JSON.stringify(notificationPayload, null, 2));
 
     // 2. Send real-time notification via Socket.IO if user is connected
     try {
-      if (isUserConnected(userId)) {
+      console.log(`🔌 [NOTIFICATION SERVICE] Checking if user ${userId} is connected...`);
+      const connected = isUserConnected(userId);
+      console.log(`🔌 [NOTIFICATION SERVICE] User ${userId} connection status: ${connected ? 'CONNECTED' : 'NOT CONNECTED'}`);
+      
+      if (connected) {
+        console.log(`📡 [NOTIFICATION SERVICE] Emitting notification to user ${userId} (${userType})...`);
         emitToUser(userId, userType, "notification", notificationPayload);
-        console.log(`📡 Real-time notification sent to ${userId}`);
+        console.log(`✅ [NOTIFICATION SERVICE] Real-time notification emitted to ${userId}`);
       } else {
-        console.log(`ℹ️  User ${userId} not connected via socket`);
+        console.log(`⚠️  [NOTIFICATION SERVICE] User ${userId} not connected via socket - will rely on FCM`);
       }
     } catch (socketError) {
-      console.error("Error sending socket notification:", socketError);
+      console.error("❌ [NOTIFICATION SERVICE] Error sending socket notification:", socketError);
       // Continue even if socket fails
     }
 
     // 3. Send push notification via FCM
     try {
+      console.log(`📱 [NOTIFICATION SERVICE] Attempting to send FCM push notification to user ${userId}...`);
+      
       const pushResult = await sendToUser(
         userId,
         userType,
@@ -111,11 +122,16 @@ const createNotification = async (notificationData) => {
         }
       );
 
+      console.log(`📊 [NOTIFICATION SERVICE] FCM push result:`, JSON.stringify(pushResult, null, 2));
+      
       if (pushResult.success) {
-        console.log(`📱 Push notification sent to user ${userId}`);
+        console.log(`✅ [NOTIFICATION SERVICE] FCM push notification sent to user ${userId}`);
+      } else {
+        console.warn(`⚠️  [NOTIFICATION SERVICE] FCM push failed:`, pushResult.error || 'Unknown error');
       }
     } catch (pushError) {
-      console.error("Error sending push notification:", pushError);
+      console.error("❌ [NOTIFICATION SERVICE] Error sending push notification:", pushError);
+      console.error("📋 [NOTIFICATION SERVICE] Push error stack:", pushError.stack);
       // Continue even if push fails
     }
 
