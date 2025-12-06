@@ -63,6 +63,7 @@ const paymentRoutes = require("./routes/paymentRoute/paymentRoute");
 const ratingRoutes = require("./routes/ratingRoute/ratingRoute");
 const helperRoutes = require("./routes/helperRoute/helperRoute");
 const notificationRoutes = require("./routes/notificationRoute/notificationRoute");
+const testNotificationRoutes = require("./routes/notificationRoute/testNotificationRoute");
 const supportRoutes = require("./routes/supportRoute/supportRoute");
 const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
 const geminiRoutes = require("./routes/aiRoute/gemniRoute");
@@ -118,6 +119,12 @@ app.use(
 app.use(
   "/api/notifications",
   notificationRoutes
+);
+
+// Test notification routes (for development/testing)
+app.use(
+  "/api/notifications",
+  testNotificationRoutes
 );
 
 // Support ticket routes

@@ -10,9 +10,13 @@ const connectedUsers = new Map(); // Map to track userId -> socketId
  * @param {http.Server} server - HTTP server instance
  */
 const initSocketServer = (server) => {
+  console.log('🚀 [SOCKET SERVER] Initializing Socket.IO server...');
+  
   io = new Server(server, {
     cors: {
       origin: function (origin, callback) {
+        console.log('🔍 [SOCKET SERVER] CORS check for origin:', origin || 'NO ORIGIN (mobile app)');
+        
         const allowedOrigins = [
           process.env.FRONTEND_URL,
           process.env.FRONTEND_URL_2,
@@ -20,11 +24,13 @@ const initSocketServer = (server) => {
 
         // Allow requests with no origin (mobile apps)
         if (!origin) {
+          console.log('✅ [SOCKET SERVER] Allowing request with no origin (mobile app)');
           return callback(null, true);
         }
 
         // Check allowed origins
         if (allowedOrigins.includes(origin)) {
+          console.log('✅ [SOCKET SERVER] Origin allowed:', origin);
           return callback(null, true);
         }
 
@@ -35,43 +41,67 @@ const initSocketServer = (server) => {
           origin.includes("192.168") ||
           origin.includes("10.0.")
         ) {
+          console.log('✅ [SOCKET SERVER] Local origin allowed:', origin);
           return callback(null, true);
         }
 
+        console.warn('⚠️  [SOCKET SERVER] Origin not allowed:', origin);
         callback(new Error("Not allowed by CORS"));
       },
       credentials: true,
       methods: ["GET", "POST"],
     },
-    transports: ["websocket", "polling"],
+    // Try polling first for better compatibility with proxies/HTTPS
+    transports: ["polling", "websocket"],
+    allowEIO3: true, // Allow Engine.IO v3 clients
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    upgradeTimeout: 30000,
+    maxHttpBufferSize: 1e6,
+    // Path configuration
+    path: '/socket.io/',
   });
+  
+  console.log('✅ [SOCKET SERVER] Socket.IO server configured');
+  console.log('📋 [SOCKET SERVER] Allowed origins:', process.env.FRONTEND_URL, process.env.FRONTEND_URL_2);
 
   // Authentication middleware for socket connections
   io.use((socket, next) => {
     try {
+      console.log('🔐 [SOCKET SERVER] New connection attempt from:', socket.handshake.address);
+      console.log('🔍 [SOCKET SERVER] Headers:', JSON.stringify(socket.handshake.headers, null, 2));
+      
       const token = socket.handshake.auth.token;
+      console.log('🔑 [SOCKET SERVER] Auth token from handshake:', token ? 'PRESENT' : 'MISSING');
       
       if (!token) {
         // Try to get from cookies
+        console.log('🍪 [SOCKET SERVER] Trying to get token from cookies...');
         const cookies = cookie.parse(socket.handshake.headers.cookie || "");
         const cookieToken = cookies.token;
         
         if (!cookieToken) {
+          console.error('❌ [SOCKET SERVER] No token in auth or cookies');
           return next(new Error("Authentication error: No token provided"));
         }
         
+        console.log('✅ [SOCKET SERVER] Token found in cookies');
         const decoded = jwt.verify(cookieToken, process.env.JWT_SECRET);
         socket.userId = decoded.id;
         socket.userType = decoded.userType;
+        console.log('✅ [SOCKET SERVER] Cookie token verified:', socket.userId, socket.userType);
         return next();
       }
 
+      console.log('🔓 [SOCKET SERVER] Verifying auth token...');
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = decoded.id;
       socket.userType = decoded.userType;
+      console.log('✅ [SOCKET SERVER] Token verified:', socket.userId, socket.userType);
       next();
     } catch (error) {
-      console.error("Socket authentication error:", error.message);
+      console.error("❌ [SOCKET SERVER] Authentication error:", error.message);
+      console.error("📋 [SOCKET SERVER] Error stack:", error.stack);
       next(new Error("Authentication error: Invalid token"));
     }
   });
@@ -81,10 +111,13 @@ const initSocketServer = (server) => {
     const userId = socket.userId;
     const userType = socket.userType;
 
-    console.log(`✅ User connected: ${userId} (${userType}) - Socket: ${socket.id}`);
+    console.log(`✅ [SOCKET SERVER] User connected: ${userId} (${userType}) - Socket: ${socket.id}`);
+    console.log(`📊 [SOCKET SERVER] Transport: ${socket.conn.transport.name}`);
+    console.log(`🌐 [SOCKET SERVER] Client address: ${socket.handshake.address}`);
 
     // Store user connection
     connectedUsers.set(userId, socket.id);
+    console.log(`📝 [SOCKET SERVER] Total connected users: ${connectedUsers.size}`);
 
     // Join user to their personal room
     socket.join(`user:${userId}`);
