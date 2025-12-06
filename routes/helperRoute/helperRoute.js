@@ -30,7 +30,7 @@ router.patch(
 router.get(
   "/available/count",
   checkForAuthenticationCookie(),
-  checkUserType(["helpseeker", "admin"]),
+  checkUserType(["helpseeker", "admin","helper"]),
   getAvailableHelpersCount
 );
 

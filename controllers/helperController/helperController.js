@@ -15,7 +15,8 @@ const getAvailabilityStatus = async (req, res) => {
     const cachedHelper = await redis.get(`helper:online:${helperId}`);
     
     if (cachedHelper) {
-      const helperData = JSON.parse(cachedHelper);
+      // Upstash Redis returns objects directly, no need to parse
+      const helperData = typeof cachedHelper === 'string' ? JSON.parse(cachedHelper) : cachedHelper;
       return res.status(200).json({
         success: true,
         message: "Availability status retrieved successfully",
@@ -98,12 +99,27 @@ const toggleAvailability = async (req, res) => {
         onlineAt: new Date().toISOString(),
       };
 
-      await redis.set(`helper:online:${helper.id}`, JSON.stringify(helperData));
+      // Upstash Redis automatically handles JSON serialization
+      await redis.set(`helper:online:${helper.id}`, helperData);
       // Optional: Set expiration (e.g., 12 hours = 43200 seconds)
       await redis.expire(`helper:online:${helper.id}`, 43200);
+      
+      // Add to sorted set for counting available helpers
+      // Using timestamp as score for ordering
+      await redis.zadd('helpers:available', {
+        score: Date.now(),
+        member: helper.id,
+      });
+      
+      console.log(`✅ Helper ${helper.id} marked as available in Redis`);
     } else {
       // If helper goes offline, remove from Redis
       await redis.del(`helper:online:${helper.id}`);
+      
+      // Remove from available helpers sorted set
+      await redis.zrem('helpers:available', helper.id);
+      
+      console.log(`✅ Helper ${helper.id} marked as offline in Redis`);
     }
 
     res.status(200).json({
@@ -198,27 +214,49 @@ const getHelperActiveTasks = async (req, res) => {
 // Get count of available helpers
 const getAvailableHelpersCount = async (req, res) => {
   try {
-    const count = await Helper.count({
-      where: {
-        isAvailable: true,
-        verificationStatus: "approved",
-      },
-    });
+    // Get count from Redis sorted set
+    const count = await redis.zcard('helpers:available');
+    
+    console.log(`📊 Available helpers count from Redis: ${count}`);
 
     res.status(200).json({
       success: true,
-      message: "Available helpers count retrieved successfully",
+      message: "Available helpers count retrieved successfully from Redis",
       data: {
         availableHelpers: count,
+        source: "redis",
       },
     });
   } catch (error) {
     console.error("Get available helpers count error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch available helpers count",
-      error: error.message,
-    });
+    
+    // Fallback to database if Redis fails
+    try {
+      const count = await Helper.count({
+        where: {
+          isAvailable: true,
+          verificationStatus: "approved",
+        },
+      });
+      
+      console.log(`📊 Fallback: Available helpers count from database: ${count}`);
+      
+      res.status(200).json({
+        success: true,
+        message: "Available helpers count retrieved successfully (database fallback)",
+        data: {
+          availableHelpers: count,
+          source: "database",
+        },
+      });
+    } catch (dbError) {
+      console.error("Database fallback also failed:", dbError);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch available helpers count",
+        error: error.message,
+      });
+    }
   }
 };
 

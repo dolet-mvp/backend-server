@@ -577,7 +577,7 @@ const getNearbyHelpers = async (req, res) => {
     const helpseekerId = req.user.id;
     const radius = process.env.TASK_SEARCH_RADIUS;
 
-    console.log("Searching for helpers near helpseeker:", helpseekerId);
+    console.log("🔍 Searching for online helpers near helpseeker:", helpseekerId);
 
     // Get helpseeker's address with coordinates
     const userAddress = await Address.findOne({
@@ -624,100 +624,65 @@ const getNearbyHelpers = async (req, res) => {
       });
     }
 
-    console.log(" Search filters:");
+    console.log("🔄 Search filters:");
     console.log(`   Radius: ${searchRadius} km`);
-    console.log("\n Step 1: Checking total helpers in database...");
+    console.log(`   Source: Redis (online helpers only)`);
 
-    // First, check how many helpers exist at all
-    const totalHelpers = await Helper.count({ where: { verificationStatus: "approved" } });
-    console.log(`   Total approved helpers: ${totalHelpers}`);
-
-    // Check how many have addresses
-    const helpersWithAddresses = await Helper.count({
-      where: { verificationStatus: "approved" },
-      include: [
-        {
-          model: Address,
-          as: "addresses",
-          required: true,
-          where: {
-            userType: 'helper',
-            latitude: { [require("sequelize").Op.ne]: null },
-            longitude: { [require("sequelize").Op.ne]: null },
-          },
-        },
-      ],
-    });
-    console.log(`   Helpers with valid addresses: ${helpersWithAddresses}`);
-
-    // Note: Helper profiles are now integrated into Helper model
-    const helpersWithProfiles = totalHelpers;
-    console.log(`   Helpers with profiles: ${helpersWithProfiles} (all approved helpers have profiles)`);
-    console.log(`   Helpers with profiles: ${helpersWithProfiles}`);
-
-    console.log("\n Step 2: Querying helpers with BOTH address AND profile...");
-
-    // Get all helpers with their addresses (profiles are now part of Helper model)
-    const helpers = await Helper.findAll({
-      where: {
-        verificationStatus: "approved",
-        isApproved: true,
-      },
-      attributes: ["id", "fullName"],
-      include: [
-        {
-          model: Address,
-          as: "addresses",
-          where: {
-            userType: 'helper',
-            latitude: {
-              [require("sequelize").Op.ne]: null,
-            },
-            longitude: {
-              [require("sequelize").Op.ne]: null,
-            },
-          },
-          required: true,
-          attributes: ["latitude", "longitude", "city", "state", "type", "isDefault"],
-        },
-      ],
-    });
-
-    console.log(`📍 Found ${helpers.length} helpers with BOTH address AND profile`);
+    // Step 1: Get all online helper IDs from Redis
+    console.log("\n📡 Step 1: Fetching online helpers from Redis...");
+    const onlineHelperIds = await redis.zrange('helpers:available', 0, -1);
     
-    if (helpers.length === 0 && totalHelpers > 0) {
-      console.log("\n ISSUE IDENTIFIED:");
-      if (helpersWithAddresses === 0) {
-        console.log("   Problem: Helpers exist but NONE have addresses with coordinates");
-        console.log("   Solution: Add addresses to helper users");
-      } else if (helpersWithProfiles === 0) {
-        console.log("   Problem: Helpers exist but NONE have helper profiles");
-        console.log("   Solution: Create helper_profiles for helper users");
-      } else {
-        console.log("   Problem: Helpers have addresses OR profiles, but not BOTH");
-        console.log("   Solution: Ensure each helper has BOTH address AND profile");
-      }
+    if (!onlineHelperIds || onlineHelperIds.length === 0) {
+      console.log("ℹ️  No online helpers found in Redis");
+      return res.status(200).json({
+        success: true,
+        message: "No online helpers available at the moment",
+        data: {
+          searchLocation: {
+            latitude: lat,
+            longitude: lng,
+          },
+          radius: searchRadius,
+          count: 0,
+          helpers: [],
+        },
+      });
     }
 
-    // Debug: Log all helpers found
-    if (helpers.length === 0) {
-      console.log(" No helpers found in database with addresses and profiles");
-      console.log(" Possible reasons:");
-      console.log("   1. No users with role='helper'");
-      console.log("   2. Helpers don't have addresses with lat/lng");
-      console.log("   3. Helpers don't have helper profiles");
-    } else {
-      console.log(`🔍 Processing ${helpers.length} helpers...`);
-    }
+    console.log(`✅ Found ${onlineHelperIds.length} online helpers in Redis`);
 
-    // Prepare helper locations for Google Maps API
+    // Step 2: Get full helper details from Redis
+    console.log("\n📄 Step 2: Fetching helper details from Redis...");
+    const helperDataPromises = onlineHelperIds.map(helperId => 
+      redis.get(`helper:online:${helperId}`)
+    );
+    
+    const helperDataResults = await Promise.all(helperDataPromises);
+    const onlineHelpers = helperDataResults
+      .filter(data => data !== null)
+      .map(data => {
+        // Upstash Redis returns objects directly if they were stored as JSON strings
+        // If it's already an object, return it; if it's a string, parse it
+        if (typeof data === 'string') {
+          return JSON.parse(data);
+        }
+        return data;
+      });
+
+    console.log(`✅ Retrieved ${onlineHelpers.length} helper profiles from Redis`);
+
+    // Step 3: Calculate distances and filter by radius
+    console.log("\n📏 Step 3: Calculating distances and filtering by radius...");
+    
     const helperLocations = [];
     const helperData = [];
 
-    for (const helper of helpers) {
-      const address = helper.addresses.find((addr) => addr.isDefault) || helper.addresses[0];
+    for (const helper of onlineHelpers) {
+      // Get default address or first available address
+      const address = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
       
-      if (!address) {
+      if (!address || !address.latitude || !address.longitude) {
+        console.log(`⚠️  Helper ${helper.fullName} has no valid address, skipping`);
         continue;
       }
 
@@ -725,6 +690,7 @@ const getNearbyHelpers = async (req, res) => {
       const helperLng = parseFloat(address.longitude);
 
       if (isNaN(helperLat) || isNaN(helperLng)) {
+        console.log(`⚠️  Helper ${helper.fullName} has invalid coordinates, skipping`);
         continue;
       }
 
@@ -732,18 +698,25 @@ const getNearbyHelpers = async (req, res) => {
       helperData.push({
         id: helper.id,
         fullName: helper.fullName,
+        email: helper.email,
+        phone: helper.phone,
+        profilePhoto: helper.profilePhoto,
+        averageRating: helper.averageRating,
+        completedTasks: helper.completedTasks,
         location: {
           latitude: helperLat,
           longitude: helperLng,
           city: address.city,
           state: address.state,
         },
-        isAvailable: helper.isAvailable,
+        onlineAt: helper.onlineAt,
       });
     }
 
+    console.log(`📊 Processing ${helperData.length} helpers with valid addresses...`);
+
     // Get distances using Google Maps API
-    console.log(`\n📍 Using Google Maps API to calculate real road distances...`);
+    console.log("\n🗺️  Step 4: Calculating real road distances with Google Maps API...");
     const googleDistances = await getGoogleMapsDistances(
       { lat, lng },
       helperLocations
@@ -752,19 +725,15 @@ const getNearbyHelpers = async (req, res) => {
     // Filter helpers within radius and format response
     const nearbyHelpers = [];
     const debugInfo = {
-      totalHelpers: helpers.length,
-      processedHelpers: 0,
-      skippedNoAddress: 0,
-      skippedInvalidCoords: 0,
-      skippedOutOfRadius: 0,
-      skippedNotAvailable: 0,
+      totalOnline: onlineHelpers.length,
+      withValidAddress: helperData.length,
       withinRadius: 0,
+      outsideRadius: 0,
       usingGoogleMaps: googleDistances !== null
     };
 
     for (let i = 0; i < helperData.length; i++) {
       const helper = helperData[i];
-      debugInfo.processedHelpers++;
 
       let distance;
       let duration = null;
@@ -773,65 +742,70 @@ const getNearbyHelpers = async (req, res) => {
       if (googleDistances && googleDistances[i] && googleDistances[i].status === "OK") {
         distance = googleDistances[i].distance;
         duration = googleDistances[i].duration;
-        console.log(` Helper ${helper.fullName}:`);
-        console.log(`   📍 Location: (${helper.location.latitude}, ${helper.location.longitude}) - ${helper.location.city}`);
+        console.log(`✓ ${helper.fullName}:`);
+        console.log(`   📍 ${helper.location.city}, ${helper.location.state}`);
         console.log(`   🚗 Road Distance: ${distance.toFixed(2)} km`);
         console.log(`   ⏱️  Travel Time: ${Math.round(duration)} mins`);
       } else {
         // Fallback to Haversine formula
         distance = calculateDistance(lat, lng, helper.location.latitude, helper.location.longitude);
-        console.log(` Helper ${helper.fullName}:`);
-        console.log(`   📍 Location: (${helper.location.latitude}, ${helper.location.longitude}) - ${helper.location.city}`);
-        console.log(`   📏 Straight-line Distance: ${distance.toFixed(2)} km (Haversine)`);
+        console.log(`✓ ${helper.fullName}:`);
+        console.log(`   📍 ${helper.location.city}, ${helper.location.state}`);
+        console.log(`   📏 Straight-line Distance: ${distance.toFixed(2)} km`);
       }
 
-     
       // Check if within radius
       if (distance > searchRadius) {
-        debugInfo.skippedOutOfRadius++;
-        console.log(`    Outside radius (${distance.toFixed(2)} km > ${searchRadius} km)`);
+        debugInfo.outsideRadius++;
+        console.log(`   ❌ Outside radius (${distance.toFixed(2)} km > ${searchRadius} km)`);
         continue;
       }
 
-     
-
       debugInfo.withinRadius++;
-      console.log(`    ✅ Added to results!`);
+      console.log(`   ✅ Within radius!`);
 
       nearbyHelpers.push({
         id: helper.id,
         fullName: helper.fullName,
+        email: helper.email,
+        phone: helper.phone,
+        profilePhoto: helper.profilePhoto,
+        averageRating: helper.averageRating,
+        completedTasks: helper.completedTasks,
         location: helper.location,
         distance: parseFloat(distance.toFixed(2)),
         travelTime: duration ? Math.round(duration) : null,
         distanceType: googleDistances ? "road" : "straight-line",
+        onlineAt: helper.onlineAt,
+        status: "online",
       });
     }
 
     // Sort by distance (nearest first)
     nearbyHelpers.sort((a, b) => a.distance - b.distance);
 
-    console.log("\n SEARCH SUMMARY:");
-    console.log(`   Total helpers in DB: ${debugInfo.totalHelpers}`);
-    console.log(`   Processed: ${debugInfo.processedHelpers}`);
-    console.log(`   Using: ${debugInfo.usingGoogleMaps ? "🗺️  Google Maps API (road distance)" : "📏 Haversine formula (straight-line)"}`);
-    console.log(`   Skipped (no address): ${debugInfo.skippedNoAddress}`);
-    console.log(`   Skipped (invalid coords): ${debugInfo.skippedInvalidCoords}`);
-    console.log(`   Skipped (out of radius): ${debugInfo.skippedOutOfRadius}`);
-    console.log(`   Skipped (not available): ${debugInfo.skippedNotAvailable}`);
-    console.log(`    Within radius & available: ${debugInfo.withinRadius}`);
-    console.log(`\n Returning ${nearbyHelpers.length} helpers within ${searchRadius}km`);
+    console.log("\n✨ SEARCH SUMMARY:");
+    console.log(`   Total online helpers: ${debugInfo.totalOnline}`);
+    console.log(`   With valid addresses: ${debugInfo.withValidAddress}`);
+    console.log(`   Distance calculation: ${debugInfo.usingGoogleMaps ? "🗺️  Google Maps API (road)" : "📏 Haversine (straight-line)"}`);
+    console.log(`   Outside radius: ${debugInfo.outsideRadius}`);
+    console.log(`   ✅ Within ${searchRadius}km: ${debugInfo.withinRadius}`);
+    console.log(`\n🎯 Returning ${nearbyHelpers.length} nearby online helpers`);
 
     res.status(200).json({
       success: true,
+      message: "Online helpers fetched from Redis",
       data: {
         searchLocation: {
           latitude: lat,
           longitude: lng,
+          city: userAddress.city,
+          state: userAddress.state,
         },
         radius: searchRadius,
         count: nearbyHelpers.length,
         helpers: nearbyHelpers,
+        source: "redis",
       },
     });
   } catch (error) {

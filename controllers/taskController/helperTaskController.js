@@ -433,6 +433,22 @@ const acceptTask = async (req, res) => {
     // Remove task from Redis cache when accepted by helper
     await redis.del(`task:${task.id}`);
 
+    // Remove helper from available helpers list in Redis since they accepted a task
+    try {
+      await redis.del(`helper:online:${helperId}`);
+      await redis.zrem('helpers:available', helperId);
+      console.log(`✅ Helper ${helperId} removed from available helpers in Redis after accepting task`);
+    } catch (redisError) {
+      console.warn(`⚠️ Failed to remove helper from Redis availability:`, redisError.message);
+      // Continue execution even if Redis update fails
+    }
+
+    // Update helper availability status in database
+    await Helper.update(
+      { isAvailable: false },
+      { where: { id: helperId } }
+    );
+
     // Notify helpseeker with OTP and helper details
     await Notification.create({
       helpseekerId: task.helpseekerId,
