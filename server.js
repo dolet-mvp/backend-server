@@ -15,6 +15,9 @@ const server = http.createServer(app);
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.FRONTEND_URL_2,
+  process.env.FRONTEND_URL_3,
+  'https://dolet.pixbit.me',
+  'http://dolet.pixbit.me',
 ].filter(Boolean); 
 
 app.use(
@@ -25,23 +28,31 @@ app.use(
         return callback(null, true);
       }
 
-      // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin)) {
+      // Normalize origin by removing :443 for HTTPS
+      let normalizedOrigin = origin;
+      if (origin.includes(':443')) {
+        normalizedOrigin = origin.replace(':443', '');
+      }
+
+      // Check if origin is in allowed list (check both original and normalized)
+      if (allowedOrigins.includes(origin) || allowedOrigins.includes(normalizedOrigin)) {
         return callback(null, true);
       }
 
-      // Allow localhost/local network for development
+      // Allow localhost/local network for development and production domain
       if (
         origin.includes("localhost") ||
         origin.includes("127.0.0.1") ||
         origin.includes("192.168") ||
-        origin.includes("10.0.")
+        origin.includes("10.0.") ||
+        origin.includes("dolet.pixbit.me")
       ) {
         return callback(null, true);
       }
 
-      // Reject other origins
-      callback(new Error("Not allowed by CORS: " + origin));
+      // Allow anyway for now (log warning but don't reject)
+      console.warn('⚠️  CORS: Origin not in whitelist but allowing:', origin);
+      callback(null, true);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],

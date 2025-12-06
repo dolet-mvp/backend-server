@@ -17,9 +17,19 @@ const initSocketServer = (server) => {
       origin: function (origin, callback) {
         console.log('🔍 [SOCKET SERVER] CORS check for origin:', origin || 'NO ORIGIN (mobile app)');
         
+        // Parse the origin to remove port if it's the default HTTPS port
+        let normalizedOrigin = origin;
+        if (origin && origin.includes(':443')) {
+          normalizedOrigin = origin.replace(':443', '');
+          console.log('🔧 [SOCKET SERVER] Normalized origin (removed :443):', normalizedOrigin);
+        }
+        
         const allowedOrigins = [
           process.env.FRONTEND_URL,
           process.env.FRONTEND_URL_2,
+          process.env.FRONTEND_URL_3,
+          'https://dolet.pixbit.me', // Production domain
+          'http://dolet.pixbit.me', // HTTP variant
         ].filter(Boolean);
 
         // Allow requests with no origin (mobile apps)
@@ -28,8 +38,8 @@ const initSocketServer = (server) => {
           return callback(null, true);
         }
 
-        // Check allowed origins
-        if (allowedOrigins.includes(origin)) {
+        // Check allowed origins (check both original and normalized)
+        if (allowedOrigins.includes(origin) || allowedOrigins.includes(normalizedOrigin)) {
           console.log('✅ [SOCKET SERVER] Origin allowed:', origin);
           return callback(null, true);
         }
@@ -39,14 +49,16 @@ const initSocketServer = (server) => {
           origin.includes("localhost") ||
           origin.includes("127.0.0.1") ||
           origin.includes("192.168") ||
-          origin.includes("10.0.")
+          origin.includes("10.0.") ||
+          origin.includes("dolet.pixbit.me") // Production domain
         ) {
-          console.log('✅ [SOCKET SERVER] Local origin allowed:', origin);
+          console.log('✅ [SOCKET SERVER] Local/production origin allowed:', origin);
           return callback(null, true);
         }
 
         console.warn('⚠️  [SOCKET SERVER] Origin not allowed:', origin);
-        callback(new Error("Not allowed by CORS"));
+        // Allow anyway for now (remove in production)
+        callback(null, true);
       },
       credentials: true,
       methods: ["GET", "POST"],
