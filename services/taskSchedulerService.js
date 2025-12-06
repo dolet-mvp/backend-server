@@ -4,6 +4,7 @@ const Task = require("../models/taskModel/taskModel");
 const TaskQueue = require("../models/queueModel/queueModel");
 const Helper = require("../models/authModel/helperModel");
 const Notification = require("../models/notificationModel/notificationModel");
+const redis = require("../config/redis/redis");
 
 const publishScheduledTask = async (task) => {
   try {
@@ -27,7 +28,43 @@ const publishScheduledTask = async (task) => {
       queuePosition: queueCount + 1,
       priority: task.priority === "urgent" ? 10 : task.priority === "high" ? 5 : 0,
     });
-    console.log(`    Added to queue at position: ${queueEntry.queuePosition}`);
+    console.log(`   ✅ Added to queue at position: ${queueEntry.queuePosition}`);
+
+    // Store the published job in Redis
+    try {
+      const jobData = {
+        taskId: task.id,
+        helpseekerId: task.helpseekerId,
+        title: task.title,
+        description: task.description,
+        category: task.category,
+        budget: task.budget,
+        estimatedDuration: task.estimatedDuration,
+        priority: task.priority,
+        locationRequired: task.locationRequired,
+        location: task.location,
+        status: task.status,
+        queuePosition: queueEntry.queuePosition,
+        publishedAt: task.publishedAt.toISOString(),
+        wasScheduled: true,
+      };
+      
+      // Store in Redis with key format: job:taskId
+      // Set expiration to 30 days (in seconds)
+      await redis.set(`job:${task.id}`, jobData);
+      await redis.expire(`job:${task.id}`, 2592000);
+      
+      // Also add to sorted set for easy retrieval of all jobs
+      await redis.zadd('jobs:published', {
+        score: Date.now(),
+        member: `job:${task.id}`,
+      });
+      
+      console.log(`   ✅ Job ${task.id} stored in Redis successfully`);
+    } catch (redisError) {
+      console.error(`   ⚠️ Failed to store job in Redis:`, redisError);
+      // Continue execution even if Redis fails
+    }
 
     // Notify available helpers
     const helpers = await Helper.findAll({
@@ -49,7 +86,7 @@ const publishScheduledTask = async (task) => {
     }));
 
     await Notification.bulkCreate(notifications);
-    console.log(`    Sent ${notifications.length} notification(s) to helpers`);
+    console.log(`   ✅ Sent ${notifications.length} notification(s) to helpers`);
 
     // Notify task creator (helpseeker)
     await Notification.create({
@@ -61,9 +98,9 @@ const publishScheduledTask = async (task) => {
       type: "task_created",
       priority: "high",
     });
-    console.log(`    Notified helpseeker (${task.helpseekerId})`);
+    console.log(`   ✅ Notified helpseeker (${task.helpseekerId})`);
 
-    console.log(`    Task ${task.id} published successfully!\n`);
+    console.log(`   ✅ Task ${task.id} published successfully!\n`);
   } catch (error) {
     console.error(`   ❌ Error publishing scheduled task ${task.id}:`, error);
   }
