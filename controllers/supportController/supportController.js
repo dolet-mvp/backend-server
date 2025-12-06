@@ -4,6 +4,7 @@ const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Admin = require("../../models/authModel/adminModel");
 const Notification = require("../../models/notificationModel/notificationModel");
+const { createNotification } = require("../../services/notificationService");
 
 // NOTE: This controller needs full polymorphic update for Helper/Helpseeker/Admin models
 // Currently using minimal fixes to allow server to start

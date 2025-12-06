@@ -1,2 +1,0 @@
-socket implementation + frontend also 
-push notification from firebase on app

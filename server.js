@@ -1,11 +1,15 @@
 require("dotenv").config();
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
 const initDB = require("./dbConnection/dbSync");
 const { initTaskScheduler } = require("./services/taskSchedulerService");
+const { initSocketServer } = require("./services/socketService");
+const { initializeFirebase } = require("./services/pushNotificationService");
 
 const PORT = process.env.PORT || 8181;
 const app = express();
+const server = http.createServer(app);
 
 // Allowed frontend origins
 const allowedOrigins = [
@@ -140,7 +144,13 @@ app.get("/api/health", (req, res) => {
 
 //testing
 initDB(() => {
-  app.listen(PORT, () => {
+  // Initialize Socket.IO server
+  initSocketServer(server);
+  
+  // Initialize Firebase for push notifications
+  initializeFirebase();
+  
+  server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
     initTaskScheduler();
     console.log(' Task scheduler initialized');

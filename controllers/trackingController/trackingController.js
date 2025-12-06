@@ -2,6 +2,7 @@ const Task = require("../../models/taskModel/taskModel");
 const Notification = require("../../models/notificationModel/notificationModel");
 const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
+const { createNotification } = require("../../services/notificationService");
 
 // Update helper status - On the way
 const updateOnTheWay = async (req, res) => {
@@ -40,8 +41,8 @@ const updateOnTheWay = async (req, res) => {
     await task.save();
 
     // Notify helpseeker
-    await Notification.create({
-      helpseekerId: task.helpseekerId,
+    await createNotification({
+      userId: task.helpseekerId,
       userType: 'helpseeker',
       taskId: task.id,
       title: "Helper is on the way",
@@ -91,8 +92,8 @@ const markArrived = async (req, res) => {
     await task.save();
 
     // Notify helpseeker
-    await Notification.create({
-      helpseekerId: task.helpseekerId,
+    await createNotification({
+      userId: task.helpseekerId,
       userType: 'helpseeker',
       taskId: task.id,
       title: "Helper Arrived",
@@ -157,8 +158,8 @@ const completeWork = async (req, res) => {
     await task.save();
 
     // Notify helpseeker
-    await Notification.create({
-      helpseekerId: task.helpseekerId,
+    await createNotification({
+      userId: task.helpseekerId,
       userType: 'helpseeker',
       taskId: task.id,
       title: "Task Completed",

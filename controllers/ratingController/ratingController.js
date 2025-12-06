@@ -3,6 +3,7 @@ const Task = require("../../models/taskModel/taskModel");
 const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Notification = require("../../models/notificationModel/notificationModel");
+const { createNotification } = require("../../services/notificationService");
 
 // Submit rating and review after task completion
 const submitRating = async (req, res) => {
@@ -106,22 +107,15 @@ const submitRating = async (req, res) => {
     }
 
     // Notify reviewee
-    const notificationData = {
+    await createNotification({
+      userId: revieweeId,
+      userType: revieweeType,
       taskId: task.id,
       title: "New Rating Received",
       message: `You received a ${rating}-star rating for "${task.title}"`,
       type: "rating_received",
       priority: "medium",
-      userType: revieweeType,
-    };
-    
-    if (revieweeType === 'helper') {
-      notificationData.helperId = revieweeId;
-    } else {
-      notificationData.helpseekerId = revieweeId;
-    }
-    
-    await Notification.create(notificationData);
+    });
 
     res.status(201).json({
       success: true,

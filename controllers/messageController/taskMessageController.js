@@ -3,6 +3,7 @@ const Task = require("../../models/taskModel/taskModel");
 const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Notification = require("../../models/notificationModel/notificationModel");
+const { createNotification } = require("../../services/notificationService");
 const { Op } = require("sequelize");
 
 /**
@@ -87,21 +88,15 @@ const sendTaskMessage = async (req, res) => {
     const receiverType = isHelpseekerSender ? 'helper' : 'helpseeker';
     
     if (receiverId) {
-      const notificationData = {
-        type: "general",
+      await createNotification({
+        userId: receiverId,
+        userType: receiverType,
+        taskId: taskId,
         title: "New Task Message",
         message: `You have a new message for task: ${task.title}`,
-        relatedId: taskId,
-        userType: receiverType,
-      };
-      
-      if (receiverType === 'helper') {
-        notificationData.helperId = receiverId;
-      } else {
-        notificationData.helpseekerId = receiverId;
-      }
-      
-      await Notification.create(notificationData);
+        type: "general",
+        priority: "medium",
+      });
     }
 
     return res.status(201).json({

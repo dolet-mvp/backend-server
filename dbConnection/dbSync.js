@@ -23,6 +23,7 @@ const initDB = (callback) => {
       require('../models/messageModel/taskMessageModel');
       require('../models/supportModel/supportTicketModel');
       require('../models/supportModel/ticketReplyModel');
+      require('../models/deviceTokenModel/deviceToken');
       
       // Load associations after all models are loaded
       require('../models/modelAssociation');

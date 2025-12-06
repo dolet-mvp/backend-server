@@ -13,6 +13,7 @@ const Message = require("../messageModel/messageModel");
 const TaskMessage = require("../messageModel/taskMessageModel");
 const SupportTicket = require("../supportModel/supportTicketModel");
 const TicketReply = require("../supportModel/ticketReplyModel");
+const DeviceToken = require("../deviceTokenModel/deviceToken");
 
 Helper.hasMany(Address, {
   foreignKey: "helperId",
@@ -358,6 +359,33 @@ TicketReply.belongsTo(SupportTicket, {
 });
 
 
+// DeviceToken -> Helper (Many-to-One, Polymorphic)
+DeviceToken.belongsTo(Helper, {
+  foreignKey: "helperId",
+  as: "helper",
+  constraints: false,
+});
+
+Helper.hasMany(DeviceToken, {
+  foreignKey: "helperId",
+  as: "deviceTokens",
+  constraints: false,
+});
+
+// DeviceToken -> Helpseeker (Many-to-One, Polymorphic)
+DeviceToken.belongsTo(Helpseeker, {
+  foreignKey: "helpseekerId",
+  as: "helpseeker",
+  constraints: false,
+});
+
+Helpseeker.hasMany(DeviceToken, {
+  foreignKey: "helpseekerId",
+  as: "deviceTokens",
+  constraints: false,
+});
+
+
 module.exports = {
   Helper,
   Helpseeker,
@@ -374,4 +402,5 @@ module.exports = {
   TaskMessage,
   SupportTicket,
   TicketReply,
+  DeviceToken,
 };

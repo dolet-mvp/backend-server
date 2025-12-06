@@ -1,5 +1,11 @@
 const Notification = require("../../models/notificationModel/notificationModel");
 const Task = require("../../models/taskModel/taskModel");
+const {
+  registerDeviceToken,
+  unregisterDeviceToken,
+  getUserDeviceTokens,
+} = require("../../services/pushNotificationService");
+const { markAsRead, markAllAsRead } = require("../../services/notificationService");
 
 // Get all notifications for user
 const getNotifications = async (req, res) => {
@@ -113,10 +119,182 @@ const deleteNotification = async (req, res) => {
   }
 };
 
+// Mark notification as read
+const markNotificationAsRead = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userType = req.user.userType;
+    const { notificationId } = req.params;
+
+    const result = await markAsRead(notificationId, userId, userType);
+
+    if (!result.success) {
+      return res.status(404).json({
+        success: false,
+        message: result.message || "Failed to mark notification as read",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Notification marked as read",
+    });
+  } catch (error) {
+    console.error("Mark notification as read error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to mark notification as read",
+      error: error.message,
+    });
+  }
+};
+
+// Mark all notifications as read
+const markAllNotificationsAsRead = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userType = req.user.userType;
+
+    await markAllAsRead(userId, userType);
+
+    res.status(200).json({
+      success: true,
+      message: "All notifications marked as read",
+    });
+  } catch (error) {
+    console.error("Mark all notifications as read error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to mark all notifications as read",
+      error: error.message,
+    });
+  }
+};
+
+// Register device token for push notifications
+const registerDevice = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userType = req.user.userType;
+    const { token, platform, deviceInfo } = req.body;
+
+    if (!token || !platform) {
+      return res.status(400).json({
+        success: false,
+        message: "Token and platform are required",
+      });
+    }
+
+    if (!["android", "ios", "web"].includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid platform. Must be android, ios, or web",
+      });
+    }
+
+    const result = await registerDeviceToken(
+      userId,
+      userType,
+      token,
+      platform,
+      deviceInfo
+    );
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.error || "Failed to register device",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      isNew: result.isNew,
+    });
+  } catch (error) {
+    console.error("Register device error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to register device",
+      error: error.message,
+    });
+  }
+};
+
+// Unregister device token
+const unregisterDevice = async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Token is required",
+      });
+    }
+
+    const result = await unregisterDeviceToken(token);
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.error || "Failed to unregister device",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    console.error("Unregister device error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to unregister device",
+      error: error.message,
+    });
+  }
+};
+
+// Get user's registered devices
+const getMyDevices = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userType = req.user.userType;
+
+    const result = await getUserDeviceTokens(userId, userType);
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.error || "Failed to get devices",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: result.tokens,
+    });
+  } catch (error) {
+    console.error("Get devices error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get devices",
+      error: error.message,
+    });
+  }
+};
+
 
 
 
 module.exports = {
   getNotifications,
   deleteNotification,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  registerDevice,
+  unregisterDevice,
+  getMyDevices,
 };

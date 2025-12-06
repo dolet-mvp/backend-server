@@ -7,6 +7,7 @@ const Address = require("../../models/addressModel/addressModel");
 const axios = require("axios");
 const jobMatchingService = require("../../services/jobMatchingService");
 const redis = require("../../config/redis/redis");
+const { createNotification } = require("../../services/notificationService");
 
 
 const generateOTP = () => {
@@ -986,8 +987,8 @@ const cancelTask = async (req, res) => {
 
     // If task is assigned, notify helper
     if (task.assignedHelperId) {
-      await Notification.create({
-        helperId: task.assignedHelperId,
+      await createNotification({
+        userId: task.assignedHelperId,
         userType: 'helper',
         taskId: task.id,
         title: "Task Cancelled",
@@ -1125,8 +1126,8 @@ const regenerateOTP = async (req, res) => {
     });
 
     // Notify helpseeker
-    await Notification.create({
-      helpseekerId: helpseekerId,
+    await createNotification({
+      userId: helpseekerId,
       userType: 'helpseeker',
       taskId: task.id,
       title: "New OTP Generated",
@@ -1136,8 +1137,8 @@ const regenerateOTP = async (req, res) => {
     });
 
     // Notify helper
-    await Notification.create({
-      helperId: task.assignedHelperId,
+    await createNotification({
+      userId: task.assignedHelperId,
       userType: 'helper',
       taskId: task.id,
       title: "New OTP Generated",
