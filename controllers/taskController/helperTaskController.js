@@ -505,6 +505,8 @@ const acceptTask = async (req, res) => {
 
     // Store helper and helpseeker locations in Redis for real-time tracking
     try {
+      console.log('📍 [ACCEPT TASK] Starting location storage in Redis...');
+      
       // Get helper's default address
       const helperAddress = await Address.findOne({
         where: { 
@@ -512,19 +514,32 @@ const acceptTask = async (req, res) => {
           isDefault: true 
         }
       });
+      
+      console.log('📍 [ACCEPT TASK] Helper address found:', helperAddress ? 'YES' : 'NO');
+      if (helperAddress) {
+        console.log('📍 [ACCEPT TASK] Helper coordinates:', {
+          lat: helperAddress.latitude,
+          lng: helperAddress.longitude
+        });
+      }
 
       // Get helpseeker location from task or their default address
       let helpseekerLat = null;
       let helpseekerLng = null;
 
+      console.log('📍 [ACCEPT TASK] Task location:', task.location);
+      console.log('📍 [ACCEPT TASK] Task steps:', task.steps);
+
       if (task.location && task.location.lat && task.location.lng) {
         // Use task location (where service is needed)
         helpseekerLat = task.location.lat;
         helpseekerLng = task.location.lng;
+        console.log('📍 [ACCEPT TASK] Using task.location:', { helpseekerLat, helpseekerLng });
       } else if (task.steps && task.steps.length > 0 && task.steps[0].location) {
         // Use first step location
         helpseekerLat = task.steps[0].location.lat;
         helpseekerLng = task.steps[0].location.lng;
+        console.log('📍 [ACCEPT TASK] Using task.steps[0].location:', { helpseekerLat, helpseekerLng });
       } else {
         // Fallback to helpseeker's default address
         const helpseekerAddress = await Address.findOne({
@@ -536,8 +551,13 @@ const acceptTask = async (req, res) => {
         if (helpseekerAddress && helpseekerAddress.latitude && helpseekerAddress.longitude) {
           helpseekerLat = parseFloat(helpseekerAddress.latitude);
           helpseekerLng = parseFloat(helpseekerAddress.longitude);
+          console.log('📍 [ACCEPT TASK] Using helpseeker default address:', { helpseekerLat, helpseekerLng });
+        } else {
+          console.warn('⚠️ [ACCEPT TASK] No helpseeker address found');
         }
       }
+
+      console.log('📍 [ACCEPT TASK] Final coordinates - Helper:', helperAddress ? 'FOUND' : 'NOT FOUND', 'Seeker:', { helpseekerLat, helpseekerLng });
 
       // Store helper location in Redis (will be updated in real-time)
       if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
@@ -551,7 +571,10 @@ const acceptTask = async (req, res) => {
         
         const helperRedisKey = `tracking:task:${task.id}:helper:${helperId}`;
         await redis.setex(helperRedisKey, 3600, JSON.stringify(helperLocationData)); // 1 hour TTL
-        console.log(`✅ [TRACKING] Helper location stored in Redis for task ${task.id}`);
+        console.log(`✅ [TRACKING] Helper location stored in Redis:`, helperRedisKey);
+        console.log(`✅ [TRACKING] Helper data:`, helperLocationData);
+      } else {
+        console.warn('⚠️ [TRACKING] Helper location NOT stored (no address found)');
       }
 
       // Store helpseeker location in Redis (static - service location)
@@ -566,10 +589,14 @@ const acceptTask = async (req, res) => {
         
         const helpseekerRedisKey = `tracking:task:${task.id}:helpseeker:${task.helpseekerId}`;
         await redis.setex(helpseekerRedisKey, 3600, JSON.stringify(helpseekerLocationData)); // 1 hour TTL
-        console.log(`✅ [TRACKING] Helpseeker location stored in Redis for task ${task.id}`);
+        console.log(`✅ [TRACKING] Helpseeker location stored in Redis:`, helpseekerRedisKey);
+        console.log(`✅ [TRACKING] Helpseeker data:`, helpseekerLocationData);
+      } else {
+        console.warn('⚠️ [TRACKING] Helpseeker location NOT stored (no coordinates found)');
       }
     } catch (locationError) {
-      console.error("❌ [TRACKING] Failed to store locations in Redis:", locationError.message);
+      console.error("❌ [TRACKING] Failed to store locations in Redis:", locationError);
+      console.error("❌ [TRACKING] Error stack:", locationError.stack);
       // Continue execution even if location storage fails
     }
 
