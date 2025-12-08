@@ -70,14 +70,20 @@ const sendTaskMessage = async (req, res) => {
       attachments,
     });
 
-    // Fetch the message with sender details
-    const senderModel = senderType === 'helper' ? Helper : Helpseeker;
+    // Fetch the message with sender details based on sender type
     const messageWithDetails = await TaskMessage.findByPk(taskMessage.id, {
       include: [
         {
-          model: senderModel,
-          as: "sender",
+          model: Helper,
+          as: "senderHelper",
           attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "senderHelpseeker",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
         },
       ],
     });
