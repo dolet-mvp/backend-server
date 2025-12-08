@@ -203,8 +203,8 @@ const initSocketServer = (server) => {
     // Handle sending chat message
     socket.on("sendTaskMessage", async (data) => {
       try {
-        const { taskId, message } = data;
-        console.log(`💬 [SOCKET SERVER] Message from ${userId} for task ${taskId}`);
+        const { taskId, message, tempId } = data;
+        console.log(`💬 [SOCKET SERVER] Message from ${userId} for task ${taskId}, tempId: ${tempId}`);
 
         const TaskMessage = require("../models/messageModel/taskMessageModel");
         const Task = require("../models/taskModel/taskModel");
@@ -214,12 +214,14 @@ const initSocketServer = (server) => {
         // Verify task access
         const task = await Task.findByPk(taskId);
         if (!task) {
-          socket.emit("messageError", { error: "Task not found" });
+          console.error(`❌ [SOCKET SERVER] Task not found: ${taskId}`);
+          socket.emit("messageError", { error: "Task not found", tempId });
           return;
         }
 
         if (task.helpseekerId !== userId && task.assignedHelperId !== userId) {
-          socket.emit("messageError", { error: "Unauthorized" });
+          console.error(`❌ [SOCKET SERVER] Unauthorized access for task ${taskId} by user ${userId}`);
+          socket.emit("messageError", { error: "Unauthorized", tempId });
           return;
         }
 
@@ -230,7 +232,10 @@ const initSocketServer = (server) => {
           senderType: userType,
           message: message.trim(),
           attachments: data.attachments || [],
+          status: 'sent', // Set initial status
         });
+
+        console.log(`✅ [SOCKET SERVER] Message saved to DB: ${taskMessage.id}`);
 
         // Fetch message with sender details
         const senderModel = userType === 'helper' ? Helper : Helpseeker;
@@ -244,17 +249,24 @@ const initSocketServer = (server) => {
           ],
         });
 
+        // Add tempId to message for client matching
+        const messageToSend = {
+          ...messageWithDetails.toJSON(),
+          tempId: tempId,
+        };
+
         // Broadcast to task chat room
         const roomName = `task:${taskId}:chat`;
         io.to(roomName).emit("newTaskMessage", {
           taskId,
-          message: messageWithDetails,
+          message: messageToSend,
         });
 
         // Send delivery confirmation to sender
         socket.emit("messageSent", {
           taskId,
           messageId: taskMessage.id,
+          tempId: tempId,
           status: "sent",
         });
 
