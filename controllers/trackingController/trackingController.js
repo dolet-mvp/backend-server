@@ -5,6 +5,7 @@ const Helpseeker = require("../../models/authModel/helpseekerModel");
 const { createNotification } = require("../../services/notificationService");
 const socketService = require("../../services/socketService");
 const redis = require("../../config/redis/redis");
+const { Op } = require("sequelize");
 
 // Update helper status - On the way
 const updateOnTheWay = async (req, res) => {
@@ -328,7 +329,7 @@ const getHelperLocation = async (req, res) => {
     const task = await Task.findOne({
       where: { 
         id: taskId,
-        [Task.sequelize.Op.or]: [
+        [Op.or]: [
           { assignedHelperId: userId },
           { helpseekerId: userId }
         ]

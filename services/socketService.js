@@ -239,7 +239,7 @@ const initSocketServer = (server) => {
     socket.on("joinTaskTracking", (taskId) => {
       const roomName = `task:${taskId}:tracking`;
       socket.join(roomName);
-      const clientCount = this.io.sockets.adapter.rooms.get(roomName)?.size || 0;
+      const clientCount = this.io?.sockets?.adapter?.rooms?.get(roomName)?.size || 0;
       console.log(`📍 [SOCKET SERVER] User ${userId} joined task tracking room: ${roomName} (${clientCount} clients)`);
     });
 
