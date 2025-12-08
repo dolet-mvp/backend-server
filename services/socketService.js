@@ -189,8 +189,15 @@ const initSocketServer = (server) => {
     socket.on("joinTaskChat", (taskId) => {
       const roomName = `task:${taskId}:chat`;
       socket.join(roomName);
-      console.log(`👥 [SOCKET SERVER] User ${userId} joined task chat room: ${roomName}`);
-      socket.emit("joinedTaskChat", { taskId, roomName });
+      
+      // Get all sockets in the room
+      const socketsInRoom = io.sockets.adapter.rooms.get(roomName);
+      const clientCount = socketsInRoom ? socketsInRoom.size : 0;
+      
+      console.log(`👥 [SOCKET SERVER] User ${userId} (${userType}) joined task chat room: ${roomName}`);
+      console.log(`📊 [SOCKET SERVER] Total clients in room ${roomName}: ${clientCount}`);
+      
+      socket.emit("joinedTaskChat", { taskId, roomName, clientCount });
     });
 
     // Handle leaving task chat room
@@ -263,6 +270,11 @@ const initSocketServer = (server) => {
 
         // Broadcast to task chat room
         const roomName = `task:${taskId}:chat`;
+        const socketsInRoom = io.sockets.adapter.rooms.get(roomName);
+        const clientCount = socketsInRoom ? socketsInRoom.size : 0;
+        
+        console.log(`📡 [SOCKET SERVER] Broadcasting to room ${roomName} with ${clientCount} clients`);
+        
         io.to(roomName).emit("newTaskMessage", {
           taskId,
           message: messageToSend,
