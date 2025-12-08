@@ -289,8 +289,8 @@ const updateLocation = async (req, res) => {
       timestamp: timestamp.toISOString(),
     };
 
-    // Store in Redis with 1 hour expiry
-    await redis.setex(redisKey, 3600, JSON.stringify(locationData));
+    // Store in Redis with 1 hour expiry (Upstash auto-serializes)
+    await redis.setex(redisKey, 3600, locationData);
     console.log(`📍 [TRACKING] Stored location in Redis: ${redisKey}`);
 
     // Broadcast real-time location update to helpseeker via socket
@@ -345,15 +345,14 @@ const getHelperLocation = async (req, res) => {
 
     // Get helper location from Redis
     const helperRedisKey = `tracking:task:${taskId}:helper:${task.assignedHelperId}`;
-    const helperLocationJson = await redis.get(helperRedisKey);
+    const helperLocation = await redis.get(helperRedisKey);
 
     // Get helpseeker location from Redis
     const helpseekerRedisKey = `tracking:task:${taskId}:helpseeker:${task.helpseekerId}`;
-    const helpseekerLocationJson = await redis.get(helpseekerRedisKey);
+    const helpseekerLocation = await redis.get(helpseekerRedisKey);
 
-    // Parse locations
-    const helperLocation = helperLocationJson ? JSON.parse(helperLocationJson) : null;
-    const helpseekerLocation = helpseekerLocationJson ? JSON.parse(helpseekerLocationJson) : null;
+    console.log('📍 [GET LOCATION] Helper location from Redis:', helperLocation);
+    console.log('📍 [GET LOCATION] Helpseeker location from Redis:', helpseekerLocation);
 
     // If no location data available at all
     if (!helperLocation && !helpseekerLocation) {
