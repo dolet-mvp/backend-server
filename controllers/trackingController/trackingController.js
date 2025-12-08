@@ -343,24 +343,38 @@ const getHelperLocation = async (req, res) => {
       });
     }
 
-    // Get location from Redis
-    const redisKey = `tracking:task:${taskId}:helper:${task.assignedHelperId}`;
-    const locationJson = await redis.get(redisKey);
+    // Get helper location from Redis
+    const helperRedisKey = `tracking:task:${taskId}:helper:${task.assignedHelperId}`;
+    const helperLocationJson = await redis.get(helperRedisKey);
 
-    if (!locationJson) {
+    // Get helpseeker location from Redis
+    const helpseekerRedisKey = `tracking:task:${taskId}:helpseeker:${task.helpseekerId}`;
+    const helpseekerLocationJson = await redis.get(helpseekerRedisKey);
+
+    // Parse locations
+    const helperLocation = helperLocationJson ? JSON.parse(helperLocationJson) : null;
+    const helpseekerLocation = helpseekerLocationJson ? JSON.parse(helpseekerLocationJson) : null;
+
+    // If no location data available at all
+    if (!helperLocation && !helpseekerLocation) {
       return res.status(404).json({
         success: false,
         message: "No location data available",
-        data: null,
+        data: {
+          helperLocation: null,
+          helpseekerLocation: null,
+        },
       });
     }
-
-    const locationData = JSON.parse(locationJson);
 
     res.status(200).json({
       success: true,
       message: "Location retrieved successfully",
-      data: locationData,
+      data: {
+        helperLocation: helperLocation,
+        helpseekerLocation: helpseekerLocation,
+        taskId: taskId,
+      },
     });
   } catch (error) {
     console.error("Get location error:", error);

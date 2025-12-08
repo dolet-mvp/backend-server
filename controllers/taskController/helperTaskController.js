@@ -503,6 +503,76 @@ const acceptTask = async (req, res) => {
       { where: { id: helperId } }
     );
 
+    // Store helper and helpseeker locations in Redis for real-time tracking
+    try {
+      // Get helper's default address
+      const helperAddress = await Address.findOne({
+        where: { 
+          helperId: helperId,
+          isDefault: true 
+        }
+      });
+
+      // Get helpseeker location from task or their default address
+      let helpseekerLat = null;
+      let helpseekerLng = null;
+
+      if (task.location && task.location.lat && task.location.lng) {
+        // Use task location (where service is needed)
+        helpseekerLat = task.location.lat;
+        helpseekerLng = task.location.lng;
+      } else if (task.steps && task.steps.length > 0 && task.steps[0].location) {
+        // Use first step location
+        helpseekerLat = task.steps[0].location.lat;
+        helpseekerLng = task.steps[0].location.lng;
+      } else {
+        // Fallback to helpseeker's default address
+        const helpseekerAddress = await Address.findOne({
+          where: { 
+            helpseekerId: task.helpseekerId,
+            isDefault: true 
+          }
+        });
+        if (helpseekerAddress && helpseekerAddress.latitude && helpseekerAddress.longitude) {
+          helpseekerLat = parseFloat(helpseekerAddress.latitude);
+          helpseekerLng = parseFloat(helpseekerAddress.longitude);
+        }
+      }
+
+      // Store helper location in Redis (will be updated in real-time)
+      if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+        const helperLocationData = {
+          taskId: task.id,
+          helperId: helperId,
+          latitude: parseFloat(helperAddress.latitude),
+          longitude: parseFloat(helperAddress.longitude),
+          timestamp: new Date().toISOString(),
+        };
+        
+        const helperRedisKey = `tracking:task:${task.id}:helper:${helperId}`;
+        await redis.setex(helperRedisKey, 3600, JSON.stringify(helperLocationData)); // 1 hour TTL
+        console.log(`✅ [TRACKING] Helper location stored in Redis for task ${task.id}`);
+      }
+
+      // Store helpseeker location in Redis (static - service location)
+      if (helpseekerLat && helpseekerLng) {
+        const helpseekerLocationData = {
+          taskId: task.id,
+          helpseekerId: task.helpseekerId,
+          latitude: helpseekerLat,
+          longitude: helpseekerLng,
+          timestamp: new Date().toISOString(),
+        };
+        
+        const helpseekerRedisKey = `tracking:task:${task.id}:helpseeker:${task.helpseekerId}`;
+        await redis.setex(helpseekerRedisKey, 3600, JSON.stringify(helpseekerLocationData)); // 1 hour TTL
+        console.log(`✅ [TRACKING] Helpseeker location stored in Redis for task ${task.id}`);
+      }
+    } catch (locationError) {
+      console.error("❌ [TRACKING] Failed to store locations in Redis:", locationError.message);
+      // Continue execution even if location storage fails
+    }
+
     // Notify helpseeker with OTP and helper details
     await Notification.create({
       helpseekerId: task.helpseekerId,
