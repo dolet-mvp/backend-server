@@ -237,23 +237,29 @@ const initSocketServer = (server) => {
 
         console.log(`✅ [SOCKET SERVER] Message saved to DB: ${taskMessage.id}`);
 
-        // Fetch message with sender details
+        // Fetch message with sender details using correct alias
+        const senderAlias = userType === 'helper' ? 'senderHelper' : 'senderHelpseeker';
         const senderModel = userType === 'helper' ? Helper : Helpseeker;
+        
         const messageWithDetails = await TaskMessage.findByPk(taskMessage.id, {
           include: [
             {
               model: senderModel,
-              as: "sender",
+              as: senderAlias,
               attributes: ["id", "fullName", "email", "profilePhoto"],
             },
           ],
         });
 
-        // Add tempId to message for client matching
+        // Normalize sender data to 'sender' for frontend
         const messageToSend = {
           ...messageWithDetails.toJSON(),
+          sender: messageWithDetails[senderAlias], // Map to 'sender' for consistency
           tempId: tempId,
         };
+
+        // Remove the original aliased property
+        delete messageToSend[senderAlias];
 
         // Broadcast to task chat room
         const roomName = `task:${taskId}:chat`;

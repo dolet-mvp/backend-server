@@ -88,6 +88,12 @@ const sendTaskMessage = async (req, res) => {
       ],
     });
 
+    // Normalize sender data to 'sender' for frontend consistency
+    const messageData = messageWithDetails.toJSON();
+    messageData.sender = messageData.senderHelper || messageData.senderHelpseeker;
+    delete messageData.senderHelper;
+    delete messageData.senderHelpseeker;
+
     // Send notification to the other user
     const isHelpseekerSender = senderId === task.helpseekerId;
     const receiverId = isHelpseekerSender ? task.assignedHelperId : task.helpseekerId;
@@ -108,7 +114,7 @@ const sendTaskMessage = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Message sent successfully",
-      data: messageWithDetails,
+      data: messageData,
     });
   } catch (error) {
     console.error("Send task message error:", error);
@@ -172,11 +178,20 @@ const getTaskMessages = async (req, res) => {
       offset: offset,
     });
 
+    // Normalize sender data for all messages
+    const normalizedMessages = messages.map(msg => {
+      const msgData = msg.toJSON();
+      msgData.sender = msgData.senderHelper || msgData.senderHelpseeker;
+      delete msgData.senderHelper;
+      delete msgData.senderHelpseeker;
+      return msgData;
+    });
+
     return res.status(200).json({
       success: true,
       message: "Messages retrieved successfully",
       data: {
-        messages,
+        messages: normalizedMessages,
         pagination: {
           total: count,
           page: parseInt(page),
