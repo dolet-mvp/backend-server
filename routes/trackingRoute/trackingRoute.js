@@ -7,6 +7,7 @@ const {
   completeWork,
   getTaskTracking,
   updateLocation,
+  getHelperLocation,
 } = require("../../controllers/trackingController/trackingController");
 const { checkUserType,checkForAuthenticationCookie } = require("../../middleware/authMiddleware");
 
@@ -46,6 +47,13 @@ router.get(
   checkForAuthenticationCookie(),
   checkUserType(["helper", "helpseeker"]),
   getTaskTracking
+);
+
+router.get(
+  "/task/:taskId/location",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  getHelperLocation
 );
 
 module.exports = router;

@@ -3,6 +3,8 @@ const Notification = require("../../models/notificationModel/notificationModel")
 const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const { createNotification } = require("../../services/notificationService");
+const socketService = require("../../services/socketService");
+const redis = require("../../config/redis/redis");
 
 // Update helper status - On the way
 const updateOnTheWay = async (req, res) => {
@@ -247,6 +249,14 @@ const updateLocation = async (req, res) => {
     const { taskId } = req.params;
     const { latitude, longitude } = req.body;
 
+    // Validate coordinates
+    if (!latitude || !longitude) {
+      return res.status(400).json({
+        success: false,
+        message: "Latitude and longitude are required",
+      });
+    }
+
     const task = await Task.findOne({
       where: { id: taskId, assignedHelperId: helperId },
     });
@@ -258,25 +268,43 @@ const updateLocation = async (req, res) => {
       });
     }
 
-    // Store current location in task's location field
-    const currentLocation = task.location || {};
-    currentLocation.helperCurrentLat = latitude;
-    currentLocation.helperCurrentLng = longitude;
-    currentLocation.lastUpdated = new Date();
-    
-    task.location = currentLocation;
-    task.changed('location', true); // Force Sequelize to recognize JSON change
-    await task.save();
+    // Only allow location updates for active tracking statuses
+    if (!['on_the_way', 'arrived'].includes(task.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Location tracking not active for this task status",
+      });
+    }
+
+    const timestamp = new Date();
+
+    // Store location in Redis (fast, temporary storage for real-time tracking)
+    const redisKey = `tracking:task:${taskId}:helper:${helperId}`;
+    const locationData = {
+      taskId: taskId,
+      helperId: helperId,
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      timestamp: timestamp.toISOString(),
+    };
+
+    // Store in Redis with 1 hour expiry
+    await redis.setex(redisKey, 3600, JSON.stringify(locationData));
+    console.log(`📍 [TRACKING] Stored location in Redis: ${redisKey}`);
+
+    // Broadcast real-time location update to helpseeker via socket
+    socketService.io.to(`task:${taskId}:tracking`).emit('helperLocationUpdate', locationData);
+    console.log(`📍 [TRACKING] Broadcasted helper location for task ${taskId}`);
 
     res.status(200).json({
       success: true,
       message: "Location updated successfully",
       data: {
-        taskId: task.id,
+        taskId: taskId,
         currentLocation: {
-          latitude,
-          longitude,
-          lastUpdated: currentLocation.lastUpdated,
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          timestamp: locationData.timestamp,
         },
       },
     });
@@ -290,10 +318,64 @@ const updateLocation = async (req, res) => {
   }
 };
 
+// Get current helper location from Redis for a task
+const getHelperLocation = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const userId = req.user.id;
+
+    // Verify user has access to this task (either helper or helpseeker)
+    const task = await Task.findOne({
+      where: { 
+        id: taskId,
+        [Task.sequelize.Op.or]: [
+          { assignedHelperId: userId },
+          { helpseekerId: userId }
+        ]
+      },
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found or access denied",
+      });
+    }
+
+    // Get location from Redis
+    const redisKey = `tracking:task:${taskId}:helper:${task.assignedHelperId}`;
+    const locationJson = await redis.get(redisKey);
+
+    if (!locationJson) {
+      return res.status(404).json({
+        success: false,
+        message: "No location data available",
+        data: null,
+      });
+    }
+
+    const locationData = JSON.parse(locationJson);
+
+    res.status(200).json({
+      success: true,
+      message: "Location retrieved successfully",
+      data: locationData,
+    });
+  } catch (error) {
+    console.error("Get location error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get location",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   updateOnTheWay,
   markArrived,
   completeWork,
   getTaskTracking,
   updateLocation,
+  getHelperLocation,
 };

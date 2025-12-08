@@ -235,6 +235,21 @@ const initSocketServer = (server) => {
       console.log(`👋 [SOCKET SERVER] User ${userId} left task chat room: ${roomName}`);
     });
 
+    // Handle joining task tracking room for real-time location updates
+    socket.on("joinTaskTracking", (taskId) => {
+      const roomName = `task:${taskId}:tracking`;
+      socket.join(roomName);
+      const clientCount = this.io.sockets.adapter.rooms.get(roomName)?.size || 0;
+      console.log(`📍 [SOCKET SERVER] User ${userId} joined task tracking room: ${roomName} (${clientCount} clients)`);
+    });
+
+    // Handle leaving task tracking room
+    socket.on("leaveTaskTracking", (taskId) => {
+      const roomName = `task:${taskId}:tracking`;
+      socket.leave(roomName);
+      console.log(`📍 [SOCKET SERVER] User ${userId} left task tracking room: ${roomName}`);
+    });
+
     // Handle sending chat message
     socket.on("sendTaskMessage", async (data) => {
       try {
