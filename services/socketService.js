@@ -185,6 +185,157 @@ const initSocketServer = (server) => {
       }
     });
 
+    // Handle joining task chat room
+    socket.on("joinTaskChat", (taskId) => {
+      const roomName = `task:${taskId}:chat`;
+      socket.join(roomName);
+      console.log(`👥 [SOCKET SERVER] User ${userId} joined task chat room: ${roomName}`);
+      socket.emit("joinedTaskChat", { taskId, roomName });
+    });
+
+    // Handle leaving task chat room
+    socket.on("leaveTaskChat", (taskId) => {
+      const roomName = `task:${taskId}:chat`;
+      socket.leave(roomName);
+      console.log(`👋 [SOCKET SERVER] User ${userId} left task chat room: ${roomName}`);
+    });
+
+    // Handle sending chat message
+    socket.on("sendTaskMessage", async (data) => {
+      try {
+        const { taskId, message } = data;
+        console.log(`💬 [SOCKET SERVER] Message from ${userId} for task ${taskId}`);
+
+        const TaskMessage = require("../models/messageModel/taskMessageModel");
+        const Task = require("../models/taskModel/taskModel");
+        const Helper = require("../models/authModel/helperModel");
+        const Helpseeker = require("../models/authModel/helpseekerModel");
+
+        // Verify task access
+        const task = await Task.findByPk(taskId);
+        if (!task) {
+          socket.emit("messageError", { error: "Task not found" });
+          return;
+        }
+
+        if (task.helpseekerId !== userId && task.assignedHelperId !== userId) {
+          socket.emit("messageError", { error: "Unauthorized" });
+          return;
+        }
+
+        // Create message
+        const taskMessage = await TaskMessage.create({
+          taskId,
+          senderId: userId,
+          senderType: userType,
+          message: message.trim(),
+          attachments: data.attachments || [],
+        });
+
+        // Fetch message with sender details
+        const senderModel = userType === 'helper' ? Helper : Helpseeker;
+        const messageWithDetails = await TaskMessage.findByPk(taskMessage.id, {
+          include: [
+            {
+              model: senderModel,
+              as: "sender",
+              attributes: ["id", "fullName", "email", "profilePhoto"],
+            },
+          ],
+        });
+
+        // Broadcast to task chat room
+        const roomName = `task:${taskId}:chat`;
+        io.to(roomName).emit("newTaskMessage", {
+          taskId,
+          message: messageWithDetails,
+        });
+
+        // Send delivery confirmation to sender
+        socket.emit("messageSent", {
+          taskId,
+          messageId: taskMessage.id,
+          status: "sent",
+        });
+
+        console.log(`✅ [SOCKET SERVER] Message broadcasted to room: ${roomName}`);
+      } catch (error) {
+        console.error("❌ [SOCKET SERVER] Error sending message:", error);
+        socket.emit("messageError", { error: error.message });
+      }
+    });
+
+    // Handle typing indicator
+    socket.on("typing", (data) => {
+      const { taskId, isTyping } = data;
+      const roomName = `task:${taskId}:chat`;
+      socket.to(roomName).emit("userTyping", {
+        userId,
+        userType,
+        isTyping,
+      });
+    });
+
+    // Handle message delivery receipt
+    socket.on("messageDelivered", async (data) => {
+      try {
+        const { messageId, taskId } = data;
+        const TaskMessage = require("../models/messageModel/taskMessageModel");
+        
+        // Update message status
+        await TaskMessage.update(
+          { 
+            status: "delivered",
+            deliveredAt: new Date(),
+          },
+          { where: { id: messageId } }
+        );
+
+        // Notify sender about delivery
+        const roomName = `task:${taskId}:chat`;
+        io.to(roomName).emit("messageStatusUpdate", {
+          messageId,
+          taskId,
+          status: "delivered",
+          deliveredAt: new Date(),
+        });
+
+        console.log(`✅ [SOCKET SERVER] Message ${messageId} marked as delivered`);
+      } catch (error) {
+        console.error("❌ [SOCKET SERVER] Error marking message as delivered:", error);
+      }
+    });
+
+    // Handle message read receipt
+    socket.on("messageRead", async (data) => {
+      try {
+        const { messageId, taskId } = data;
+        const TaskMessage = require("../models/messageModel/taskMessageModel");
+        
+        // Update message status
+        await TaskMessage.update(
+          { 
+            status: "read",
+            readAt: new Date(),
+          },
+          { where: { id: messageId } }
+        );
+
+        // Notify sender about read
+        const roomName = `task:${taskId}:chat`;
+        io.to(roomName).emit("messageStatusUpdate", {
+          messageId,
+          taskId,
+          status: "read",
+          readAt: new Date(),
+        });
+
+        console.log(`✅ [SOCKET SERVER] Message ${messageId} marked as read`);
+      } catch (error) {
+        console.error("❌ [SOCKET SERVER] Error marking message as read:", error);
+      }
+    });
+
     // Handle disconnection
     socket.on("disconnect", () => {
       console.log(`❌ User disconnected: ${userId} - Socket: ${socket.id}`);

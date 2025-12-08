@@ -36,6 +36,22 @@ const TaskMessage = sequelize.define(
       defaultValue: [],
       comment: "Array of file URLs or attachment objects",
     },
+    status: {
+      type: DataTypes.ENUM("sending", "sent", "delivered", "read"),
+      allowNull: false,
+      defaultValue: "sent",
+      comment: "Message delivery status",
+    },
+    deliveredAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When message was delivered to recipient",
+    },
+    readAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When message was read by recipient",
+    },
   },
   {
     tableName: "task_messages",
