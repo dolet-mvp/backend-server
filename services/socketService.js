@@ -200,6 +200,34 @@ const initSocketServer = (server) => {
       socket.emit("joinedTaskChat", { taskId, roomName, clientCount });
     });
 
+    // Handle subscribing to nearby helpers updates (for helpseekers)
+    socket.on("subscribeNearbyHelpers", async (data) => {
+      try {
+        const { latitude, longitude, radius } = data;
+        const roomName = `nearby:${userId}`;
+        
+        socket.join(roomName);
+        console.log(`📍 [SOCKET SERVER] Helpseeker ${userId} subscribed to nearby helpers updates`);
+        
+        // Immediately send current nearby helpers
+        const helperController = require("../controllers/taskController/helpseekerTaskController");
+        // Store location data for this user
+        socket.helperSearchLocation = { latitude, longitude, radius };
+        
+        socket.emit("subscribed", { roomName });
+      } catch (error) {
+        console.error("❌ [SOCKET SERVER] Error subscribing to nearby helpers:", error);
+      }
+    });
+
+    // Handle unsubscribing from nearby helpers updates
+    socket.on("unsubscribeNearbyHelpers", () => {
+      const roomName = `nearby:${userId}`;
+      socket.leave(roomName);
+      delete socket.helperSearchLocation;
+      console.log(`📍 [SOCKET SERVER] Helpseeker ${userId} unsubscribed from nearby helpers updates`);
+    });
+
     // Handle leaving task chat room
     socket.on("leaveTaskChat", (taskId) => {
       const roomName = `task:${taskId}:chat`;
@@ -422,6 +450,51 @@ const isUserConnected = (userId) => {
 };
 
 /**
+ * Broadcast nearby helpers update to specific helpseeker
+ * @param {string} helpseekerId - Helpseeker ID
+ * @param {object} helpersData - Nearby helpers data
+ */
+const broadcastNearbyHelpersUpdate = (helpseekerId, helpersData) => {
+  try {
+    const io = getIO();
+    const roomName = `nearby:${helpseekerId}`;
+    
+    io.to(roomName).emit("nearbyHelpersUpdate", {
+      timestamp: new Date().toISOString(),
+      ...helpersData,
+    });
+    
+    console.log(`📍 [SOCKET SERVER] Broadcasted nearby helpers update to ${helpseekerId}`);
+  } catch (error) {
+    console.error("❌ [SOCKET SERVER] Error broadcasting nearby helpers:", error);
+  }
+};
+
+/**
+ * Broadcast helper status change to all subscribed helpseekers
+ * @param {string} helperId - Helper ID
+ * @param {string} status - 'online' or 'offline'
+ * @param {object} helperData - Helper location and details
+ */
+const broadcastHelperStatusChange = async (helperId, status, helperData) => {
+  try {
+    const io = getIO();
+    
+    // Notify all helpseekers who might be interested
+    io.emit("helperStatusChanged", {
+      helperId,
+      status,
+      timestamp: new Date().toISOString(),
+      ...helperData,
+    });
+    
+    console.log(`📡 [SOCKET SERVER] Broadcasted helper ${helperId} status: ${status}`);
+  } catch (error) {
+    console.error("❌ [SOCKET SERVER] Error broadcasting helper status:", error);
+  }
+};
+
+/**
  * Get all connected users count
  * @returns {number} - Number of connected users
  */
@@ -452,4 +525,6 @@ module.exports = {
   isUserConnected,
   getConnectedUsersCount,
   broadcastToUserType,
+  broadcastNearbyHelpersUpdate,
+  broadcastHelperStatusChange,
 };

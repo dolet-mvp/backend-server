@@ -112,6 +112,18 @@ const toggleAvailability = async (req, res) => {
       });
       
       console.log(`✅ Helper ${helper.id} marked as available in Redis`);
+      
+      // Broadcast helper online status
+      const socketService = require("../../services/socketService");
+      socketService.broadcastHelperStatusChange(helper.id, 'online', {
+        helper: {
+          id: helper.id,
+          fullName: helper.fullName,
+          profilePhoto: helper.profilePhoto,
+          averageRating: helper.averageRating,
+          completedTasks: helper.completedTasks,
+        },
+      });
     } else {
       // If helper goes offline, remove from Redis
       await redis.del(`helper:online:${helper.id}`);
@@ -120,6 +132,14 @@ const toggleAvailability = async (req, res) => {
       await redis.zrem('helpers:available', helper.id);
       
       console.log(`✅ Helper ${helper.id} marked as offline in Redis`);
+      
+      // Broadcast helper offline status
+      const socketService = require("../../services/socketService");
+      socketService.broadcastHelperStatusChange(helper.id, 'offline', {
+        helper: {
+          id: helper.id,
+        },
+      });
     }
 
     res.status(200).json({
