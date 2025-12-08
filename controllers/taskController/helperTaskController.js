@@ -239,8 +239,31 @@ const getAvailableTasks = async (req, res) => {
 
     console.log(`✅ Found ${tasksFromRedis.length} tasks in Redis with status 'in_queue'`);
 
-    // Use Redis tasks only
-    const tasksToProcess = tasksFromRedis;
+    // Validate tasks against database and clean up stale ones
+    const validTasks = [];
+    for (const redisTask of tasksFromRedis) {
+      const taskId = redisTask.taskId || redisTask.id;
+      
+      // Check database status
+      const dbTask = await Task.findByPk(taskId, {
+        attributes: ['id', 'status', 'assignedHelperId'],
+      });
+      
+      // If task doesn't exist in DB or has invalid status, remove from Redis
+      if (!dbTask || !['in_queue', 'published'].includes(dbTask.status) || dbTask.assignedHelperId) {
+        console.log(`🧹 Cleaning up stale task ${taskId} from Redis (DB status: ${dbTask?.status || 'not found'})`);
+        await redis.del(`job:${taskId}`);
+        await redis.zrem('jobs:published', `job:${taskId}`);
+        continue;
+      }
+      
+      validTasks.push(redisTask);
+    }
+    
+    console.log(`✅ ${validTasks.length} valid tasks after database validation`);
+
+    // Use validated Redis tasks only
+    const tasksToProcess = validTasks;
 
     // Filter out tasks this helper has already rejected or passed
     const availableTasksForHelper = [];
@@ -378,6 +401,19 @@ const acceptTask = async (req, res) => {
     const helperId = req.user.id;
     const { taskId } = req.params;
 
+    // Check if task exists in Redis first (source of truth for available tasks)
+    const redisTaskKey = `job:${taskId}`;
+    const cachedTask = await redis.get(redisTaskKey);
+    
+    if (!cachedTask) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found or no longer available",
+        hint: "This task may have been cancelled, completed, or removed from the queue",
+      });
+    }
+
+    // Get task from database for full details
     const task = await Task.findByPk(taskId, {
       include: [
         {
@@ -389,21 +425,37 @@ const acceptTask = async (req, res) => {
     });
  
     if (!task) {
+      // Task exists in Redis but not in database - clean up Redis
+      await redis.del(redisTaskKey);
+      await redis.zrem('jobs:published', redisTaskKey);
+      
       return res.status(404).json({
         success: false,
-        message: "Task not found",
+        message: "Task not found in database",
       });
     }
 
-    if (task.status !== "in_queue") {
+    // Accept tasks with status "published" or "in_queue"
+    if (task.status !== "in_queue" && task.status !== "published") {
+      // Task status changed - remove from Redis cache
+      await redis.del(redisTaskKey);
+      await redis.zrem('jobs:published', redisTaskKey);
+      
       return res.status(400).json({
         success: false,
         message: "Task is not available for acceptance",
+        currentStatus: task.status,
+        allowedStatuses: ["in_queue", "published"],
+        hint: "Task status has changed and has been removed from available tasks",
       });
     }
 
     // Check if task is already assigned
     if (task.assignedHelperId) {
+      // Task already assigned - remove from Redis cache
+      await redis.del(redisTaskKey);
+      await redis.zrem('jobs:published', redisTaskKey);
+      
       return res.status(400).json({
         success: false,
         message: "This task has already been accepted by another helper",

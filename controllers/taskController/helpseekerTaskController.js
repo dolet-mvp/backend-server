@@ -1004,6 +1004,15 @@ const cancelTask = async (req, res) => {
     // Remove from queue if exists
     await TaskQueue.destroy({ where: { taskId: task.id } });
 
+    // Remove from Redis cache when cancelled
+    try {
+      await redis.del(`job:${task.id}`);
+      await redis.zrem('jobs:published', `job:${task.id}`);
+      console.log(`✅ Cancelled task ${task.id} removed from Redis`);
+    } catch (redisError) {
+      console.warn(`⚠️ Failed to remove cancelled task from Redis:`, redisError.message);
+    }
+
     res.status(200).json({
       success: true,
       message: "Task cancelled successfully",

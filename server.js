@@ -79,6 +79,7 @@ const diagnosticRoutes = require("./routes/notificationRoute/diagnosticRoute");
 const supportRoutes = require("./routes/supportRoute/supportRoute");
 const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
 const geminiRoutes = require("./routes/aiRoute/gemniRoute");
+const reportRoutes = require("./routes/reportRoute/reportRoute");
 
 
 
@@ -143,6 +144,18 @@ app.use(
 app.use(
   "/api/notifications",
   diagnosticRoutes
+);
+
+// Report routes
+app.use(
+  "/api/reports",
+  reportRoutes
+);
+
+// Support routes
+app.use(
+  "/api/reports",
+  reportRoutes
 );
 
 // Support ticket routes
