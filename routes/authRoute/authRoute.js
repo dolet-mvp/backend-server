@@ -65,7 +65,6 @@ router.get(
 );
 router.post(
   "/admin/register",
-  checkForAuthenticationCookie(),
   handleAdminSignup
 );
 
