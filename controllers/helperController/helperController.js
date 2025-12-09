@@ -580,6 +580,7 @@ const debugRedisState = async (req, res) => {
 };
 
 module.exports = {
+  findAndAssociateNearestHelper,
   getAvailabilityStatus,
   toggleAvailability,
   getHelperCompletedTasks,
