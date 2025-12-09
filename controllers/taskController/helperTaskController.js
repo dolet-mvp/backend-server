@@ -17,19 +17,37 @@ const generateOTP = () => {
 // Store helper rejection/pass in Redis
 const storeHelperAction = async (taskId, helperId, action, reason = null) => {
   const key = `task:${taskId}:actions`;
-  const actionData = {
-    helperId,
-    action, // 'rejected' or 'passed'
-    reason,
-    timestamp: new Date().toISOString(),
-  };
   
-  // Add to list of actions for this task
+  // Get existing actions
   const existingActions = await redis.get(key);
   const actions = existingActions 
     ? (typeof existingActions === 'string' ? JSON.parse(existingActions) : existingActions)
     : [];
-  actions.push(actionData);
+  
+  // Check if this helper has already acted on this task
+  const existingActionIndex = actions.findIndex(a => a.helperId === helperId);
+  
+  if (existingActionIndex !== -1) {
+    // Helper already acted - update the existing action instead of adding duplicate
+    console.log(`⚠️ Helper ${helperId} already ${actions[existingActionIndex].action} task ${taskId}, updating action...`);
+    actions[existingActionIndex] = {
+      helperId,
+      action,
+      reason,
+      timestamp: new Date().toISOString(),
+      previousAction: actions[existingActionIndex].action,
+      previousTimestamp: actions[existingActionIndex].timestamp,
+    };
+  } else {
+    // New action - add to list
+    const actionData = {
+      helperId,
+      action, // 'rejected' or 'passed'
+      reason,
+      timestamp: new Date().toISOString(),
+    };
+    actions.push(actionData);
+  }
   
   await redis.set(key, JSON.stringify(actions));
   await redis.expire(key, 86400); // 24 hours
@@ -300,12 +318,16 @@ const getAvailableTasks = async (req, res) => {
     // Filter out tasks this helper has already rejected or passed
     const availableTasksForHelper = [];
     for (const task of tasksToProcess) {
-      const taskId = task.id;
+      const taskId = task.taskId || task.id;
       const hasActed = await hasHelperActedOnTask(taskId, helperId);
       if (!hasActed) {
         availableTasksForHelper.push(task);
+      } else {
+        console.log(`⏭️ Helper ${helperId} already acted on task ${taskId}, skipping...`);
       }
     }
+    
+    console.log(`✅ ${availableTasksForHelper.length} tasks available after filtering acted tasks`);
 
     // Filter tasks by location radius with Google Distance Matrix API
     const nearbyTasksPromises = availableTasksForHelper.map(async (task) => {
@@ -748,6 +770,15 @@ const rejectTask = async (req, res) => {
       attributes: ["id", "fullName"],
     });
 
+    // Check if helper has already acted on this task
+    const hasActed = await hasHelperActedOnTask(taskId, helperId);
+    if (hasActed) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already acted on this task",
+      });
+    }
+
     // Store rejection in Redis immediately (even without reason)
     const actions = await storeHelperAction(taskId, helperId, 'rejected', rejectionReason);
     
@@ -1169,6 +1200,15 @@ const passTask = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "This task is no longer available",
+      });
+    }
+
+    // Check if helper has already acted on this task
+    const hasActed = await hasHelperActedOnTask(taskId, helperId);
+    if (hasActed) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already acted on this task",
       });
     }
 

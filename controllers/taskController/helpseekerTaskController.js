@@ -232,6 +232,17 @@ const calculateDistanceWithGoogle = async (origin, destination) => {
   }
 };
 
+// Check if helper has already rejected or passed a task
+const hasHelperActedOnTask = async (taskId, helperId) => {
+  const key = `task:${taskId}:actions`;
+  const actionsData = await redis.get(key);
+  
+  if (!actionsData) return false;
+  
+  const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
+  return actions.some(action => action.helperId === helperId);
+};
+
 // Helper function to find the nearest available helper and associate with task
 const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50) => {
   try {
@@ -291,13 +302,39 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
       return [];
     }
     
+    // Filter out helpers who have already acted on this task (rejected/passed)
+    console.log('\n🔍 Step 3: Filtering out helpers who already acted on this task...');
+    const availableHelpers = [];
+    const availableHelperLocations = [];
+    
+    for (let i = 0; i < validHelpers.length; i++) {
+      const helper = validHelpers[i];
+      const hasActed = await hasHelperActedOnTask(taskId, helper.id);
+      
+      if (hasActed) {
+        console.log(`   ⏭️ Helper ${helper.fullName || helper.id} already acted on task - SKIPPED`);
+        continue;
+      }
+      
+      availableHelpers.push(helper);
+      availableHelperLocations.push(helperLocations[i]);
+    }
+    
+    if (availableHelpers.length === 0) {
+      console.log('\n❌ RESULT: No available helpers (all have already acted on this task)');
+      console.log('========================================\n');
+      return [];
+    }
+    
+    console.log(`   ✅ ${availableHelpers.length} helper(s) available after filtering`);
+    
     // Calculate distances using Google Maps API (batch call)
-    console.log('\n🔍 Step 3: Calculating distances using Google Maps API...');
-    console.log(`   Batch request for ${validHelpers.length} helper(s)`);
+    console.log('\n🔍 Step 4: Calculating distances using Google Maps API...');
+    console.log(`   Batch request for ${availableHelpers.length} helper(s)`);
     
     const googleDistances = await getGoogleMapsDistances(
       { lat: taskLocation.lat, lng: taskLocation.lng },
-      helperLocations
+      availableHelperLocations
     );
     
     if (!googleDistances) {
@@ -308,8 +345,8 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
     
     const helpersWithDistance = [];
     
-    for (let i = 0; i < validHelpers.length; i++) {
-      const helper = validHelpers[i];
+    for (let i = 0; i < availableHelpers.length; i++) {
+      const helper = availableHelpers[i];
       const address = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
       
       let distance, duration;
@@ -361,7 +398,7 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
     }
     
     console.log('\n----------------------------------------');
-    console.log('🔍 Step 4: Selecting nearest helper...');
+    console.log('🔍 Step 5: Selecting nearest helper...');
     
     if (helpersWithDistance.length === 0) {
       console.log(`❌ RESULT: No helpers found within ${searchRadius}km for task ${taskId}`);
@@ -382,7 +419,7 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
     console.log(`      ETA: ${nearestHelper.durationText}`);
     
     // Store association in Redis (only 1 helper)
-    console.log('\n🔍 Step 5: Creating bidirectional associations in Redis...');
+    console.log('\n🔍 Step 6: Creating bidirectional associations in Redis...');
     const associationKey = `task:${taskId}:associated_helpers`;
     const helperIds = [nearestHelper.helperId];
     
