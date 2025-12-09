@@ -26,7 +26,9 @@ const storeHelperAction = async (taskId, helperId, action, reason = null) => {
   
   // Add to list of actions for this task
   const existingActions = await redis.get(key);
-  const actions = existingActions ? JSON.parse(existingActions) : [];
+  const actions = existingActions 
+    ? (typeof existingActions === 'string' ? JSON.parse(existingActions) : existingActions)
+    : [];
   actions.push(actionData);
   
   await redis.set(key, JSON.stringify(actions));
@@ -42,7 +44,7 @@ const hasHelperActedOnTask = async (taskId, helperId) => {
   
   if (!actionsData) return false;
   
-  const actions = JSON.parse(actionsData);
+  const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
   return actions.some(action => action.helperId === helperId);
 };
 
@@ -51,7 +53,9 @@ const getTaskActions = async (taskId) => {
   const key = `task:${taskId}:actions`;
   const actionsData = await redis.get(key);
   
-  return actionsData ? JSON.parse(actionsData) : [];
+  return actionsData 
+    ? (typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData)
+    : [];
 };
 
 // Calculate distance using Google Distance Matrix API
@@ -745,7 +749,9 @@ const rejectTask = async (req, res) => {
       const associatedTasksData = await redis.get(helperTasksKey);
       
       if (associatedTasksData) {
-        const tasksList = JSON.parse(associatedTasksData);
+        const tasksList = typeof associatedTasksData === 'string' 
+          ? JSON.parse(associatedTasksData) 
+          : associatedTasksData;
         const updatedList = tasksList.filter(id => id !== taskId);
         
         if (updatedList.length > 0) {
@@ -759,7 +765,9 @@ const rejectTask = async (req, res) => {
       const taskHelpersData = await redis.get(taskHelpersKey);
       
       if (taskHelpersData) {
-        const helpersList = JSON.parse(taskHelpersData);
+        const helpersList = typeof taskHelpersData === 'string' 
+          ? JSON.parse(taskHelpersData) 
+          : taskHelpersData;
         const updatedHelpers = helpersList.filter(id => id !== helperId);
         
         if (updatedHelpers.length > 0) {
@@ -873,7 +881,9 @@ const updateRejectionReason = async (req, res) => {
       });
     }
 
-    const actions = JSON.parse(actionsData);
+    const actions = typeof actionsData === 'string' 
+      ? JSON.parse(actionsData) 
+      : actionsData;
     const helperAction = actions.find(a => a.helperId === helperId && a.action === 'rejected');
     
     if (!helperAction) {
