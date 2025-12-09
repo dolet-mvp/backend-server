@@ -225,7 +225,7 @@ const calculateDistanceWithGoogle = async (origin, destination) => {
     console.error(`      ❌ Google Distance Matrix API error: ${error.message}`);
     if (error.response) {
       console.error(`      📡 Response status: ${error.response.status}`);
-      console.error(`      📄 Response data:`, error.response.data);
+      console.error(`      📄 Response data:`, JSON.stringify(error.response.data));
     }
     console.error(`      📚 Stack:`, error.stack);
     return null;
@@ -258,60 +258,105 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
     const helperPromises = onlineHelperKeys.map(key => redis.get(key));
     const helpersData = await Promise.all(helperPromises);
     
-    console.log(`   Retrieved ${helpersData.filter(d => d !== null).length} helper profile(s)`);
+    const helpers = helpersData
+      .filter(data => data !== null)
+      .map(data => typeof data === 'string' ? JSON.parse(data) : data);
+    
+    console.log(`   Retrieved ${helpers.length} helper profile(s)`);
+    
+    // Prepare helper locations for batch API call
+    const helperLocations = [];
+    const validHelpers = [];
+    
+    for (let i = 0; i < helpers.length; i++) {
+      const helper = helpers[i];
+      console.log(`\n   📌 Helper ${i + 1}/${helpers.length}: ${helper.id}`);
+      console.log(`      Name: ${helper.fullName || 'N/A'}`);
+      
+      const address = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
+      
+      if (!address || !address.latitude || !address.longitude) {
+        console.log(`      ⚠️ No valid address - SKIPPED`);
+        continue;
+      }
+      
+      console.log(`      Location: lat=${address.latitude}, lng=${address.longitude}`);
+      helperLocations.push({ lat: parseFloat(address.latitude), lng: parseFloat(address.longitude) });
+      validHelpers.push(helper);
+    }
+    
+    if (validHelpers.length === 0) {
+      console.log('\n❌ RESULT: No helpers with valid addresses');
+      console.log('========================================\n');
+      return [];
+    }
+    
+    // Calculate distances using Google Maps API (batch call)
+    console.log('\n🔍 Step 3: Calculating distances using Google Maps API...');
+    console.log(`   Batch request for ${validHelpers.length} helper(s)`);
+    
+    const googleDistances = await getGoogleMapsDistances(
+      { lat: taskLocation.lat, lng: taskLocation.lng },
+      helperLocations
+    );
+    
+    if (!googleDistances) {
+      console.log('   ❌ Google Maps API call failed - falling back to Haversine');
+    } else {
+      console.log(`   ✓ Received ${googleDistances.length} distance result(s)`);
+    }
     
     const helpersWithDistance = [];
     
-    // Calculate distance for each helper using Google Maps API
-    console.log('🔍 Step 3: Calculating distances using Google Maps API...');
-    
-    for (let i = 0; i < helpersData.length; i++) {
-      const helperData = helpersData[i];
-      if (!helperData) continue;
+    for (let i = 0; i < validHelpers.length; i++) {
+      const helper = validHelpers[i];
+      const address = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
       
-      const helper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
-      console.log(`\n   📌 Helper ${i + 1}/${helpersData.length}: ${helper.id}`);
-      console.log(`      Name: ${helper.fullName || 'N/A'}`);
+      let distance, duration;
       
-      // Get helper location from addresses
-      if (helper.addresses && helper.addresses.length > 0) {
-        const address = helper.addresses.find(addr => addr.isDefault) || helper.addresses[0];
-        console.log(`      Location: lat=${address.latitude}, lng=${address.longitude}`);
+      if (googleDistances && googleDistances[i] && googleDistances[i].status === 'OK') {
+        distance = googleDistances[i].distance;
+        duration = googleDistances[i].duration;
         
-        if (address && address.latitude && address.longitude && taskLocation && taskLocation.lat && taskLocation.lng) {
-          console.log(`      🌐 Calling Google Maps API...`);
-          // Use Google Maps API for accurate road distance
-          const distanceData = await calculateDistanceWithGoogle(
-            { lat: address.latitude, lng: address.longitude },
-            { lat: taskLocation.lat, lng: taskLocation.lng }
-          );
-          
-          if (!distanceData) {
-            console.log(`      ❌ Google Maps API call failed`);
-            continue;
-          }
-          
-          console.log(`      ✓ Distance: ${distanceData.distanceText} (${distanceData.distance.toFixed(2)}km)`);
-          console.log(`      ✓ Duration: ${distanceData.durationText}`);
-          
-          if (distanceData.distance <= searchRadius) {
-            console.log(`      ✓ Within ${searchRadius}km radius - INCLUDED`);
-            helpersWithDistance.push({
-              helperId: helper.id,
-              distance: distanceData.distance,
-              duration: distanceData.duration,
-              distanceText: distanceData.distanceText,
-              durationText: distanceData.durationText,
-              helperName: helper.fullName,
-            });
-          } else {
-            console.log(`      ✗ Beyond ${searchRadius}km radius - EXCLUDED`);
-          }
+        const distanceText = distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`;
+        const durationText = duration < 60 ? `${Math.round(duration)} mins` : `${Math.floor(duration / 60)} hr ${Math.round(duration % 60)} mins`;
+        
+        console.log(`\n   ✓ Helper: ${helper.fullName || helper.id}`);
+        console.log(`      🚗 Road Distance: ${distanceText}`);
+        console.log(`      ⏱️  Travel Time: ${durationText}`);
+        
+        if (distance <= searchRadius) {
+          console.log(`      ✓ Within ${searchRadius}km radius - INCLUDED`);
+          helpersWithDistance.push({
+            helperId: helper.id,
+            helperName: helper.fullName,
+            distance: distance,
+            duration: duration * 60, // Convert minutes to seconds
+            distanceText: distanceText,
+            durationText: durationText,
+          });
         } else {
-          console.log(`      ⚠️ Missing address data - SKIPPED`);
+          console.log(`      ✗ Beyond ${searchRadius}km radius - EXCLUDED`);
         }
       } else {
-        console.log(`      ⚠️ No addresses found - SKIPPED`);
+        // Fallback to Haversine
+        distance = calculateDistance(taskLocation.lat, taskLocation.lng, address.latitude, address.longitude);
+        console.log(`\n   ⚠️ Helper: ${helper.fullName || helper.id}`);
+        console.log(`      📏 Straight-line Distance: ${distance.toFixed(2)} km (Haversine fallback)`);
+        
+        if (distance <= searchRadius) {
+          console.log(`      ✓ Within ${searchRadius}km radius - INCLUDED`);
+          helpersWithDistance.push({
+            helperId: helper.id,
+            helperName: helper.fullName,
+            distance: distance,
+            duration: null,
+            distanceText: `${distance.toFixed(1)} km`,
+            durationText: 'N/A',
+          });
+        } else {
+          console.log(`      ✗ Beyond ${searchRadius}km radius - EXCLUDED`);
+        }
       }
     }
     
@@ -333,7 +378,7 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
     console.log(`   🎯 NEAREST HELPER SELECTED:`);
     console.log(`      ID: ${nearestHelper.helperId}`);
     console.log(`      Name: ${nearestHelper.helperName || 'N/A'}`);
-    console.log(`      Distance: ${nearestHelper.distanceText} (${nearestHelper.distance.toFixed(2)}km)`);
+    console.log(`      Distance: ${nearestHelper.distanceText}`);
     console.log(`      ETA: ${nearestHelper.durationText}`);
     
     // Store association in Redis (only 1 helper)
