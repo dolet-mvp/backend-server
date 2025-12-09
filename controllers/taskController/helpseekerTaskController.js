@@ -1185,7 +1185,6 @@ const getGoogleMapsDistances = async (origin, destinations) => {
 const getNearbyHelpers = async (req, res) => {
   try {
     const helpseekerId = req.user.id;
-    const radius = process.env.TASK_SEARCH_RADIUS;
 
     console.log("🔍 Searching for online helpers near helpseeker:", helpseekerId);
 
@@ -1216,7 +1215,15 @@ const getNearbyHelpers = async (req, res) => {
 
     const lat = parseFloat(userAddress.latitude);
     const lng = parseFloat(userAddress.longitude);
-    const searchRadius = parseFloat(radius);
+    
+    // Enforce maximum radius of 100km to prevent unreasonable search radius
+    const envRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
+    const maxRadius = 100;
+    const searchRadius = Math.min(envRadius, maxRadius);
+    
+    if (envRadius > maxRadius) {
+      console.log(`⚠️ Search radius ${envRadius}km exceeds maximum ${maxRadius}km, using ${searchRadius}km`);
+    }
 
     console.log("📍 User location:", {
       latitude: lat,

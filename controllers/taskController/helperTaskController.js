@@ -214,7 +214,14 @@ const getAvailableTasks = async (req, res) => {
       });
     }
 
-    const searchRadius = parseFloat(radius);
+    // Enforce maximum radius of 100km to prevent unreasonable search radius
+    const envRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
+    const maxRadius = 100;
+    const searchRadius = Math.min(envRadius, maxRadius);
+    
+    if (envRadius > maxRadius) {
+      console.log(`⚠️ Search radius ${envRadius}km exceeds maximum ${maxRadius}km, using ${searchRadius}km`);
+    }
 
     // Validate coordinates
     if (
