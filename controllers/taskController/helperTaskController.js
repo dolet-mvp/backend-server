@@ -818,7 +818,7 @@ const rejectTask = async (req, res) => {
       
       console.log(`✅ Helper ${helperId} removed from task ${taskId} associations after rejection`);
       
-      // Find and associate the nearest available helper
+      // Find and associate the nearest available helper to the rejected task
       if (task.location || (task.steps && task.steps[0] && task.steps[0].location)) {
         const taskLocation = task.location || task.steps[0].location;
         
@@ -847,6 +847,44 @@ const rejectTask = async (req, res) => {
         } else {
           console.log(`⚠️ No replacement helper found for task ${taskId}`);
         }
+      }
+      
+      // Now find other available tasks and associate them with this helper
+      console.log(`\n🔄 Searching for other available tasks to associate with helper ${helperId}...`);
+      try {
+        // Get helper's location
+        const helperData = await redis.get(`helper:online:${helperId}`);
+        if (helperData) {
+          const helperInfo = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
+          const helperAddress = helperInfo.addresses?.find(addr => addr.isDefault) || helperInfo.addresses?.[0];
+          
+          if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+            const helperLocation = {
+              lat: parseFloat(helperAddress.latitude),
+              lng: parseFloat(helperAddress.longitude)
+            };
+            const searchRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
+            
+            // Use the new associateTasksWithHelper function
+            const { associateTasksWithHelper } = require('./helpseekerTaskController');
+            const associatedTasks = await associateTasksWithHelper(
+              helperId, 
+              helperLocation, 
+              searchRadius, 
+              [taskId] // Exclude the task they just rejected
+            );
+            
+            if (associatedTasks.length > 0) {
+              console.log(`   ✅ Associated ${associatedTasks.length} new task(s) with helper ${helperId}`);
+              console.log(`      Task: ${associatedTasks[0].taskId}`);
+              console.log(`      Distance: ${associatedTasks[0].distanceText}`);
+            } else {
+              console.log(`   ℹ️ No other available tasks found within radius`);
+            }
+          }
+        }
+      } catch (associateError) {
+        console.warn(`⚠️ Failed to associate other tasks:`, associateError.message);
       }
     } catch (reassignError) {
       console.warn(`⚠️ Failed to reassign task:`, reassignError.message);
@@ -1251,7 +1289,7 @@ const passTask = async (req, res) => {
       
       console.log(`✅ Helper ${helperId} removed from task ${taskId} associations after passing`);
       
-      // Find and associate the nearest available helper
+      // Find and associate the nearest available helper to the passed task
       if (task.location || (task.steps && task.steps[0] && task.steps[0].location)) {
         const taskLocation = task.location || task.steps[0].location;
         
@@ -1280,6 +1318,44 @@ const passTask = async (req, res) => {
         } else {
           console.log(`⚠️ No replacement helper found for task ${taskId}`);
         }
+      }
+      
+      // Now find other available tasks and associate them with this helper
+      console.log(`\n🔄 Searching for other available tasks to associate with helper ${helperId}...`);
+      try {
+        // Get helper's location
+        const helperData = await redis.get(`helper:online:${helperId}`);
+        if (helperData) {
+          const helper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
+          const helperAddress = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
+          
+          if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+            const helperLocation = {
+              lat: parseFloat(helperAddress.latitude),
+              lng: parseFloat(helperAddress.longitude)
+            };
+            const searchRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
+            
+            // Use the new associateTasksWithHelper function (similar to how publishTask works)
+            const { associateTasksWithHelper } = require('./helpseekerTaskController');
+            const associatedTasks = await associateTasksWithHelper(
+              helperId, 
+              helperLocation, 
+              searchRadius, 
+              [taskId] // Exclude the task they just passed
+            );
+            
+            if (associatedTasks.length > 0) {
+              console.log(`   ✅ Associated ${associatedTasks.length} new task(s) with helper ${helperId}`);
+              console.log(`      Task: ${associatedTasks[0].taskId}`);
+              console.log(`      Distance: ${associatedTasks[0].distanceText}`);
+            } else {
+              console.log(`   ℹ️ No other available tasks found within radius`);
+            }
+          }
+        }
+      } catch (associateError) {
+        console.warn(`⚠️ Failed to associate other tasks:`, associateError.message);
       }
     } catch (reassignError) {
       console.warn(`⚠️ Failed to reassign task:`, reassignError.message);

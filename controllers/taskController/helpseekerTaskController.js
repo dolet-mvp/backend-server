@@ -480,6 +480,215 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
   }
 };
 
+// Helper function to find and associate available tasks with a specific helper
+const associateTasksWithHelper = async (helperId, helperLocation, searchRadius = 50, excludeTaskIds = []) => {
+  try {
+    console.log('\n========================================');
+    console.log('🔗 FINDING AVAILABLE TASKS FOR HELPER');
+    console.log('========================================');
+    console.log(`👤 Helper ID: ${helperId}`);
+    console.log(`📍 Helper Location: lat=${helperLocation.lat}, lng=${helperLocation.lng}`);
+    console.log(`📍 Search Radius: ${searchRadius}km`);
+    console.log(`🚫 Excluded Tasks: ${excludeTaskIds.join(', ') || 'None'}`);
+    console.log('----------------------------------------');
+    
+    // Get all published tasks from Redis
+    console.log('🔍 Step 1: Fetching published tasks from Redis...');
+    const taskKeys = await redis.keys('job:*');
+    
+    if (!taskKeys || taskKeys.length === 0) {
+      console.log('❌ RESULT: No tasks found in Redis');
+      console.log('========================================\n');
+      return [];
+    }
+    
+    console.log(`   Found ${taskKeys.length} task key(s)`);
+    
+    const taskPromises = taskKeys.map(key => redis.get(key));
+    const tasksData = await Promise.all(taskPromises);
+    
+    const tasks = tasksData
+      .filter(data => data !== null)
+      .map(data => typeof data === 'string' ? JSON.parse(data) : data)
+      .filter(task => task.status === 'in_queue');
+    
+    console.log(`   Retrieved ${tasks.length} task(s) with status 'in_queue'`);
+    
+    if (tasks.length === 0) {
+      console.log('❌ RESULT: No tasks in queue');
+      console.log('========================================\n');
+      return [];
+    }
+    
+    // Filter tasks with valid locations
+    console.log('\n🔍 Step 2: Filtering tasks with valid locations...');
+    const validTasks = [];
+    const taskLocations = [];
+    
+    for (const task of tasks) {
+      const taskId = task.taskId || task.id;
+      
+      // Skip excluded tasks
+      if (excludeTaskIds.includes(taskId)) {
+        console.log(`   ⏭️ Task ${taskId} excluded, skipping`);
+        continue;
+      }
+      
+      const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+      
+      if (!taskLocation || !taskLocation.lat || !taskLocation.lng) {
+        console.log(`   ⚠️ Task ${taskId} has no valid location, skipping`);
+        continue;
+      }
+      
+      // Check if task is already associated with a helper
+      const associatedHelpersKey = `task:${taskId}:associated_helpers`;
+      const associatedHelpersData = await redis.get(associatedHelpersKey);
+      
+      if (associatedHelpersData) {
+        const associatedHelpers = typeof associatedHelpersData === 'string' 
+          ? JSON.parse(associatedHelpersData) 
+          : associatedHelpersData;
+        
+        if (associatedHelpers && associatedHelpers.length > 0) {
+          console.log(`   ⏭️ Task ${taskId} already associated with helper(s), skipping`);
+          continue;
+        }
+      }
+      
+      // Check if this helper has already acted on this task
+      const actionsKey = `task:${taskId}:actions`;
+      const actionsData = await redis.get(actionsKey);
+      
+      if (actionsData) {
+        const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
+        const hasActed = actions.some(action => action.helperId === helperId);
+        
+        if (hasActed) {
+          console.log(`   ⏭️ Helper already acted on task ${taskId}, skipping`);
+          continue;
+        }
+      }
+      
+      validTasks.push(task);
+      taskLocations.push({ 
+        lat: parseFloat(taskLocation.lat), 
+        lng: parseFloat(taskLocation.lng) 
+      });
+    }
+    
+    if (validTasks.length === 0) {
+      console.log('\n❌ RESULT: No valid unassigned tasks available');
+      console.log('========================================\n');
+      return [];
+    }
+    
+    console.log(`   ✅ ${validTasks.length} valid task(s) available for association`);
+    
+    // Calculate distances using Google Maps API
+    console.log('\n🔍 Step 3: Calculating distances...');
+    const googleDistances = await getGoogleMapsDistances(
+      { lat: helperLocation.lat, lng: helperLocation.lng },
+      taskLocations
+    );
+    
+    const tasksWithDistance = [];
+    
+    for (let i = 0; i < validTasks.length; i++) {
+      const task = validTasks[i];
+      const taskId = task.taskId || task.id;
+      let distance, duration;
+      
+      if (googleDistances && googleDistances[i] && googleDistances[i].status === 'OK') {
+        distance = googleDistances[i].distance;
+        duration = googleDistances[i].duration;
+        
+        console.log(`   ✓ Task ${taskId}: ${distance.toFixed(2)}km (${Math.round(duration)} mins)`);
+        
+        if (distance <= searchRadius) {
+          tasksWithDistance.push({
+            taskId: taskId,
+            task: task,
+            distance: distance,
+            duration: duration * 60,
+            distanceText: distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`,
+            durationText: duration < 60 ? `${Math.round(duration)} mins` : `${Math.floor(duration / 60)} hr ${Math.round(duration % 60)} mins`,
+          });
+        }
+      } else {
+        // Fallback to Haversine
+        const taskLocation = taskLocations[i];
+        distance = calculateDistance(helperLocation.lat, helperLocation.lng, taskLocation.lat, taskLocation.lng);
+        
+        console.log(`   ✓ Task ${taskId}: ${distance.toFixed(2)}km (straight-line)`);
+        
+        if (distance <= searchRadius) {
+          tasksWithDistance.push({
+            taskId: taskId,
+            task: task,
+            distance: distance,
+            duration: null,
+            distanceText: `${distance.toFixed(1)} km`,
+            durationText: 'N/A',
+          });
+        }
+      }
+    }
+    
+    if (tasksWithDistance.length === 0) {
+      console.log(`\n❌ RESULT: No tasks within ${searchRadius}km radius`);
+      console.log('========================================\n');
+      return [];
+    }
+    
+    // Sort by distance and pick the nearest one
+    tasksWithDistance.sort((a, b) => a.distance - b.distance);
+    const nearestTask = tasksWithDistance[0];
+    
+    console.log('\n🔍 Step 4: Associating nearest task with helper...');
+    console.log(`   🎯 NEAREST TASK: ${nearestTask.taskId}`);
+    console.log(`      Distance: ${nearestTask.distanceText}`);
+    console.log(`      ETA: ${nearestTask.durationText}`);
+    
+    // Associate task with helper
+    const taskHelpersKey = `task:${nearestTask.taskId}:associated_helpers`;
+    await redis.setex(taskHelpersKey, 2592000, JSON.stringify([helperId]));
+    console.log(`   ✓ Added helper ${helperId} to task ${nearestTask.taskId}`);
+    
+    // Add task to helper's list
+    const helperTasksKey = `helper:${helperId}:associated_tasks`;
+    const helperTasksData = await redis.get(helperTasksKey);
+    
+    let tasksList = [];
+    if (helperTasksData) {
+      tasksList = typeof helperTasksData === 'string' ? JSON.parse(helperTasksData) : helperTasksData;
+    }
+    
+    if (!tasksList.includes(nearestTask.taskId)) {
+      tasksList.push(nearestTask.taskId);
+      await redis.setex(helperTasksKey, 43200, JSON.stringify(tasksList));
+      console.log(`   ✓ Added task ${nearestTask.taskId} to helper's list`);
+    }
+    
+    console.log('\n✅ ASSOCIATION SUCCESSFUL!');
+    console.log('========================================\n');
+    
+    return [{
+      taskId: nearestTask.taskId,
+      distance: nearestTask.distance,
+      distanceText: nearestTask.distanceText,
+      duration: nearestTask.duration,
+      durationText: nearestTask.durationText,
+    }];
+  } catch (error) {
+    console.error('\n❌ ERROR IN TASK ASSOCIATION:');
+    console.error('   Error:', error.message);
+    console.error('   Stack:', error.stack);
+    console.log('========================================\n');
+    return [];
+  }
+};
+
 const publishTask = async (req, res) => {
   try {
     const { taskId } = req.params;
@@ -1638,4 +1847,5 @@ module.exports = {
   increaseReward,
   regenerateOTP,
   getGoogleMapsDistances,
+  associateTasksWithHelper,
 };
