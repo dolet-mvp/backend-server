@@ -247,9 +247,40 @@ const toggleAvailability = async (req, res) => {
               if (!taskData) continue;
               
               const task = typeof taskData === 'string' ? JSON.parse(taskData) : taskData;
+              const taskId = task.taskId || task.id;
               const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
               
               if (taskLocation && taskLocation.lat && taskLocation.lng) {
+                // ✅ Check if helper has already acted on this task (passed/rejected)
+                const actionsKey = `task:${taskId}:actions`;
+                const actionsData = await redis.get(actionsKey);
+                
+                let hasActed = false;
+                if (actionsData) {
+                  const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
+                  hasActed = actions.some(action => action.helperId === helper.id);
+                }
+                
+                if (hasActed) {
+                  console.log(`   ⏭️ Helper already acted on task ${taskId}, skipping`);
+                  continue;
+                }
+                
+                // Check if task is already associated with another helper
+                const taskHelpersKey = `task:${taskId}:associated_helpers`;
+                const associatedHelpersData = await redis.get(taskHelpersKey);
+                
+                if (associatedHelpersData) {
+                  const associatedHelpers = typeof associatedHelpersData === 'string' 
+                    ? JSON.parse(associatedHelpersData) 
+                    : associatedHelpersData;
+                  
+                  if (associatedHelpers && associatedHelpers.length > 0 && !associatedHelpers.includes(helper.id)) {
+                    console.log(`   ⏭️ Task ${taskId} already associated with another helper, skipping`);
+                    continue;
+                  }
+                }
+                
                 // Use Google Maps Distance Matrix API
                 try {
                   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -272,7 +303,7 @@ const toggleAvailability = async (req, res) => {
                       
                       if (distanceInKm <= 50) {
                         tasksWithDistance.push({
-                          taskId: task.taskId || task.id,
+                          taskId: taskId,
                           distance: distanceInKm,
                         });
                       }
@@ -300,7 +331,7 @@ const toggleAvailability = async (req, res) => {
               
               console.log(`✅ Helper ${helper.id} associated with nearest task ${taskId} (${nearestTask.distance.toFixed(2)}km)`);
             } else {
-              console.log(`⚠️ No tasks found within 50km for helper ${helper.id}`);
+              console.log(`⚠️ No tasks found within 50km for helper ${helper.id} (after filtering acted tasks)`);
             }
           }
         }
