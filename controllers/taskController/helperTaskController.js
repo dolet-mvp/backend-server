@@ -484,8 +484,16 @@ const acceptTask = async (req, res) => {
       where: { taskId: task.id },
     });
 
-    // Remove task from Redis cache when accepted by helper
-    await redis.del(`task:${task.id}`);
+    // Remove task from Redis cache when accepted by helper - use correct key
+    try {
+      const redisTaskKey = `job:${task.id}`;
+      await redis.del(redisTaskKey);
+      await redis.zrem('jobs:published', redisTaskKey);
+      console.log(`✅ Task ${task.id} removed from Redis after acceptance`);
+    } catch (redisError) {
+      console.warn(`⚠️ Failed to remove task from Redis:`, redisError.message);
+      // Continue execution even if Redis update fails
+    }
 
     // Remove helper from available helpers list in Redis since they accepted a task
     try {
