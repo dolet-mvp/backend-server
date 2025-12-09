@@ -498,9 +498,16 @@ const acceptTask = async (req, res) => {
       });
     }
 
-    // Get helper details
+    // Get helper details with addresses
     const helper = await Helper.findByPk(helperId, {
       attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
+      include: [
+        {
+          model: Address,
+          as: "addresses",
+          attributes: ["id", "latitude", "longitude", "city", "state", "isDefault"],
+        },
+      ],
     });
 
     // Generate OTP
@@ -551,14 +558,10 @@ const acceptTask = async (req, res) => {
     try {
       console.log('📍 [ACCEPT TASK] Starting location storage in Redis...');
       
-      // Get helper's default address
-      const helperAddress = await Address.findOne({
-        where: { 
-          helperId: helperId,
-          isDefault: true 
-        }
-      });
+      // Get helper's default address from the included addresses
+      const helperAddress = helper.addresses?.find(addr => addr.isDefault === true) || helper.addresses?.[0];
       
+      console.log('📍 [ACCEPT TASK] Helper has addresses:', helper.addresses?.length || 0);
       console.log('📍 [ACCEPT TASK] Helper address found:', helperAddress ? 'YES' : 'NO');
       if (helperAddress) {
         console.log('📍 [ACCEPT TASK] Helper coordinates:', {
