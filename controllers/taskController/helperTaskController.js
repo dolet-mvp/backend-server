@@ -265,7 +265,22 @@ const getAvailableTasks = async (req, res) => {
     // Filter tasks to only show those associated with this helper
     const helperTasksKey = `helper:${helperId}:associated_tasks`;
     const associatedTasksData = await redis.get(helperTasksKey);
-    const associatedTaskIds = associatedTasksData ? JSON.parse(associatedTasksData) : [];
+    
+    // Handle both string and object responses from Upstash Redis
+    let associatedTaskIds = [];
+    if (associatedTasksData) {
+      if (typeof associatedTasksData === 'string') {
+        try {
+          associatedTaskIds = JSON.parse(associatedTasksData);
+        } catch (parseError) {
+          console.error(`❌ Failed to parse associated tasks data:`, parseError.message);
+          console.error(`   Raw data:`, associatedTasksData);
+          associatedTaskIds = [];
+        }
+      } else {
+        associatedTaskIds = associatedTasksData;
+      }
+    }
     
     console.log(`📋 Helper ${helperId} has ${associatedTaskIds.length} associated tasks`);
     
@@ -289,26 +304,35 @@ const getAvailableTasks = async (req, res) => {
     // Filter tasks by location radius with Google Distance Matrix API
     const nearbyTasksPromises = availableTasksForHelper.map(async (task) => {
       // If task doesn't require location or has no location, include it
-      if (!task.locationRequired || !task.location) {
+      if (!task.locationRequired || (!task.location && (!task.steps || !task.steps[0]?.location))) {
         return { task, distance: 0, duration: null, distanceText: 'N/A', durationText: 'N/A' };
       }
 
+      // Get task location from either task.location or steps[0].location
+      const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+      
       // If task has location, check if it's within radius
-      if (task.location.lat && task.location.lng) {
-        // Try Google Distance Matrix API first
-        const googleDistance = await calculateDistanceWithGoogle(
+      if (taskLocation && taskLocation.lat && taskLocation.lng) {
+        // Try Google Distance Matrix API using batch function
+        const googleDistances = await getGoogleMapsDistances(
           { lat: helperLat, lng: helperLng },
-          { lat: parseFloat(task.location.lat), lng: parseFloat(task.location.lng) }
+          [{ lat: parseFloat(taskLocation.lat), lng: parseFloat(taskLocation.lng) }]
         );
 
-        if (googleDistance) {
-          if (googleDistance.distance <= searchRadius) {
+        if (googleDistances && googleDistances[0] && googleDistances[0].status === 'OK') {
+          const distance = googleDistances[0].distance;
+          const duration = googleDistances[0].duration;
+          
+          if (distance <= searchRadius) {
+            const distanceText = distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`;
+            const durationText = duration < 60 ? `${Math.round(duration)} mins` : `${Math.floor(duration / 60)} hr ${Math.round(duration % 60)} mins`;
+            
             return {
               task,
-              distance: parseFloat(googleDistance.distance.toFixed(2)),
-              duration: googleDistance.duration,
-              distanceText: googleDistance.distanceText,
-              durationText: googleDistance.durationText,
+              distance: parseFloat(distance.toFixed(2)),
+              duration: duration * 60, // Convert to seconds
+              distanceText: distanceText,
+              durationText: durationText,
               source: 'google_maps',
             };
           }
@@ -317,8 +341,8 @@ const getAvailableTasks = async (req, res) => {
           const distance = calculateDistance(
             helperLat,
             helperLng,
-            parseFloat(task.location.lat),
-            parseFloat(task.location.lng)
+            parseFloat(taskLocation.lat),
+            parseFloat(taskLocation.lng)
           );
 
           if (distance <= searchRadius) {
