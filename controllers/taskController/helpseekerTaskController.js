@@ -237,10 +237,19 @@ const hasHelperActedOnTask = async (taskId, helperId) => {
   const key = `task:${taskId}:actions`;
   const actionsData = await redis.get(key);
   
-  if (!actionsData) return false;
-  
+  if (!actionsData) return { hasActed: false, taskId, helperId };
+
   const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
-  return actions.some(action => action.helperId === helperId);
+  const actionFound = actions.find(action => action.helperId === helperId);
+  
+  return {
+    hasActed: !!actionFound,
+    taskId,
+    helperId,
+    action: actionFound?.action || null,
+    timestamp: actionFound?.timestamp || null,
+    reason: actionFound?.reason || null
+  };
 };
 
 // Helper function to find the nearest available helper and associate with task
@@ -309,10 +318,10 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
     
     for (let i = 0; i < validHelpers.length; i++) {
       const helper = validHelpers[i];
-      const hasActed = await hasHelperActedOnTask(taskId, helper.id);
+      const actionResult = await hasHelperActedOnTask(taskId, helper.id);
       
-      if (hasActed) {
-        console.log(`   ⏭️ Helper ${helper.fullName || helper.id} already acted on task - SKIPPED`);
+      if (actionResult.hasActed) {
+        console.log(`   ⏭️ Helper ${helper.fullName || helper.id} already acted on task ${taskId} (${actionResult.action}) - SKIPPED`);
         continue;
       }
       
@@ -557,17 +566,11 @@ const associateTasksWithHelper = async (helperId, helperLocation, searchRadius =
       }
       
       // Check if this helper has already acted on this task
-      const actionsKey = `task:${taskId}:actions`;
-      const actionsData = await redis.get(actionsKey);
+      const actionResult = await hasHelperActedOnTask(taskId, helperId);
       
-      if (actionsData) {
-        const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
-        const hasActed = actions.some(action => action.helperId === helperId);
-        
-        if (hasActed) {
-          console.log(`   ⏭️ Helper already acted on task ${taskId}, skipping`);
-          continue;
-        }
+      if (actionResult.hasActed) {
+        console.log(`   ⏭️ Helper already acted on task ${taskId} (${actionResult.action}), skipping`);
+        continue;
       }
       
       validTasks.push(task);

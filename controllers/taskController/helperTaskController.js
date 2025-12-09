@@ -60,10 +60,19 @@ const hasHelperActedOnTask = async (taskId, helperId) => {
   const key = `task:${taskId}:actions`;
   const actionsData = await redis.get(key);
   
-  if (!actionsData) return false;
+  if (!actionsData) return { hasActed: false, taskId, helperId };
   
   const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
-  return actions.some(action => action.helperId === helperId);
+  const actionFound = actions.find(action => action.helperId === helperId);
+  
+  return {
+    hasActed: !!actionFound,
+    taskId,
+    helperId,
+    action: actionFound?.action || null,
+    timestamp: actionFound?.timestamp || null,
+    reason: actionFound?.reason || null
+  };
 };
 
 // Get all helpers who have acted on a task
@@ -319,11 +328,11 @@ const getAvailableTasks = async (req, res) => {
     const availableTasksForHelper = [];
     for (const task of tasksToProcess) {
       const taskId = task.taskId || task.id;
-      const hasActed = await hasHelperActedOnTask(taskId, helperId);
-      if (!hasActed) {
+      const actionResult = await hasHelperActedOnTask(taskId, helperId);
+      if (!actionResult.hasActed) {
         availableTasksForHelper.push(task);
       } else {
-        console.log(`⏭️ Helper ${helperId} already acted on task ${taskId}, skipping...`);
+        console.log(`⏭️ Helper ${helperId} already acted on task ${taskId} (${actionResult.action}), skipping...`);
       }
     }
     
@@ -771,11 +780,16 @@ const rejectTask = async (req, res) => {
     });
 
     // Check if helper has already acted on this task
-    const hasActed = await hasHelperActedOnTask(taskId, helperId);
-    if (hasActed) {
+    const actionResult = await hasHelperActedOnTask(taskId, helperId);
+    if (actionResult.hasActed) {
       return res.status(400).json({
         success: false,
-        message: "You have already acted on this task",
+        message: `You have already ${actionResult.action} this task`,
+        data: {
+          taskId: actionResult.taskId,
+          action: actionResult.action,
+          timestamp: actionResult.timestamp
+        }
       });
     }
 
@@ -1242,11 +1256,16 @@ const passTask = async (req, res) => {
     }
 
     // Check if helper has already acted on this task
-    const hasActed = await hasHelperActedOnTask(taskId, helperId);
-    if (hasActed) {
+    const actionResult = await hasHelperActedOnTask(taskId, helperId);
+    if (actionResult.hasActed) {
       return res.status(400).json({
         success: false,
-        message: "You have already acted on this task",
+        message: `You have already ${actionResult.action} this task`,
+        data: {
+          taskId: actionResult.taskId,
+          action: actionResult.action,
+          timestamp: actionResult.timestamp
+        }
       });
     }
 
