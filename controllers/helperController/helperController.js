@@ -11,6 +11,17 @@ const findAndAssociateNearestHelper = async (taskId, taskLocation, excludeHelper
   try {
     console.log(`\n🔍 Finding replacement helper for task ${taskId}...`);
     
+    // Get helpers who have already acted on this task (rejected/passed)
+    const actionsKey = `task:${taskId}:actions`;
+    const actionsData = await redis.get(actionsKey);
+    let actedHelperIds = [];
+    
+    if (actionsData) {
+      const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
+      actedHelperIds = actions.map(action => action.helperId);
+      console.log(`   Found ${actedHelperIds.length} helper(s) who already acted on this task`);
+    }
+    
     // Get all online helpers from Redis
     const onlineHelperKeys = await redis.keys('helper:online:*');
     
@@ -25,7 +36,7 @@ const findAndAssociateNearestHelper = async (taskId, taskLocation, excludeHelper
     const validHelpers = helpersData
       .filter(data => data !== null)
       .map(data => typeof data === 'string' ? JSON.parse(data) : data)
-      .filter(helper => helper.id !== excludeHelperId); // Exclude the helper going offline
+      .filter(helper => helper.id !== excludeHelperId && !actedHelperIds.includes(helper.id)); // Exclude helpers who acted
     
     if (validHelpers.length === 0) {
       console.log('   ⚠️ No other online helpers available');

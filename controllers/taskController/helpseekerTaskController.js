@@ -1464,6 +1464,14 @@ const increaseReward = async (req, res) => {
     task.budget = parseFloat(task.budget) + parseFloat(additionalAmount);
     await task.save();
 
+    // Clear helper actions (rejections/passes) to give all helpers a fresh chance
+    try {
+      await redis.del(`task:${taskId}:actions`);
+      console.log(`✅ Cleared all helper actions for task ${taskId} after reward increase`);
+    } catch (redisError) {
+      console.warn(`⚠️ Failed to clear helper actions:`, redisError.message);
+    }
+
     // Notify helpers about increased reward
     const helpers = await Helper.findAll({
       where: { verificationStatus: "approved", isApproved: true },

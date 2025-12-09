@@ -553,6 +553,14 @@ const acceptTask = async (req, res) => {
       // Continue execution even if Redis update fails
     }
 
+    // Clear all helper actions (rejections/passes) since task is now accepted
+    try {
+      await redis.del(`task:${taskId}:actions`);
+      console.log(`✅ Cleared all helper actions for task ${taskId} after acceptance`);
+    } catch (redisError) {
+      console.warn(`⚠️ Failed to clear helper actions:`, redisError.message);
+    }
+
     // Update helper availability status in database
     await Helper.update(
       { isAvailable: false },
