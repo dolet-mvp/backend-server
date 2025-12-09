@@ -176,7 +176,7 @@ const completeWork = async (req, res) => {
 
     // Automatically set helper back to available/online
     try {
-   
+   const Address = require('../../models/addressModel/addressModel')
     const helper = await Helper.findByPk(helperId, {
       include: [
         {

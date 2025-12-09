@@ -613,7 +613,7 @@ const acceptTask = async (req, res) => {
         };
         
         const helperRedisKey = `tracking:task:${task.id}:helper:${helperId}`;
-        await redis.setex(helperRedisKey, 3600, helperLocationData); // 1 hour TTL (Upstash auto-serializes)
+        await redis.setex(helperRedisKey, 3600, JSON.stringify(helperLocationData)); // 1 hour TTL
         console.log(`✅ [TRACKING] Helper location stored in Redis:`, helperRedisKey);
         console.log(`✅ [TRACKING] Helper data:`, helperLocationData);
       } else {
@@ -631,7 +631,7 @@ const acceptTask = async (req, res) => {
         };
         
         const helpseekerRedisKey = `tracking:task:${task.id}:helpseeker:${task.helpseekerId}`;
-        await redis.setex(helpseekerRedisKey, 3600, helpseekerLocationData); // 1 hour TTL (Upstash auto-serializes)
+        await redis.setex(helpseekerRedisKey, 3600, JSON.stringify(helpseekerLocationData)); // 1 hour TTL
         console.log(`✅ [TRACKING] Helpseeker location stored in Redis:`, helpseekerRedisKey);
         console.log(`✅ [TRACKING] Helpseeker data:`, helpseekerLocationData);
       } else {

@@ -866,6 +866,10 @@ const getGoogleMapsDistances = async (origin, destinations) => {
 
     if (response.data.status !== "OK") {
       console.warn(`⚠️ Google Maps API returned status: ${response.data.status}`);
+      if (response.data.error_message) {
+        console.warn(`⚠️ Error message: ${response.data.error_message}`);
+      }
+      console.warn(`⚠️ Full response:`, JSON.stringify(response.data));
       return null;
     }
 
