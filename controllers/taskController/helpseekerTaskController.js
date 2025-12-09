@@ -169,11 +169,15 @@ const calculateDistanceWithGoogle = async (origin, destination) => {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     
     if (!apiKey) {
-      console.warn("Google Maps API key not found");
+      console.error("❌ Google Maps API key not found in environment");
       return null;
     }
 
     const url = `https://maps.googleapis.com/maps/api/distancematrix/json`;
+    console.log(`      🌐 API Request: ${url}`);
+    console.log(`      📍 Origin: ${origin.lat},${origin.lng}`);
+    console.log(`      📍 Destination: ${destination.lat},${destination.lng}`);
+    
     const response = await axios.get(url, {
       params: {
         origins: `${origin.lat},${origin.lng}`,
@@ -183,23 +187,47 @@ const calculateDistanceWithGoogle = async (origin, destination) => {
       },
     });
 
-    if (response.data.status === 'OK' && 
-        response.data.rows[0]?.elements[0]?.status === 'OK') {
-      const distanceInMeters = response.data.rows[0].elements[0].distance.value;
-      const distanceInKm = distanceInMeters / 1000;
-      const durationInSeconds = response.data.rows[0].elements[0].duration.value;
-      
-      return {
-        distance: distanceInKm,
-        duration: durationInSeconds,
-        distanceText: response.data.rows[0].elements[0].distance.text,
-        durationText: response.data.rows[0].elements[0].duration.text,
-      };
+    console.log(`      📡 API Response Status: ${response.data.status}`);
+    
+    if (response.data.status !== 'OK') {
+      console.error(`      ❌ API returned status: ${response.data.status}`);
+      if (response.data.error_message) {
+        console.error(`      ❌ Error message: ${response.data.error_message}`);
+      }
+      console.error(`      📄 Full response:`, JSON.stringify(response.data));
+      return null;
     }
     
-    return null;
+    const element = response.data.rows[0]?.elements[0];
+    if (!element) {
+      console.error(`      ❌ No route elements in response`);
+      return null;
+    }
+    
+    console.log(`      📡 Element Status: ${element.status}`);
+    
+    if (element.status !== 'OK') {
+      console.error(`      ❌ Element status: ${element.status}`);
+      return null;
+    }
+    
+    const distanceInMeters = element.distance.value;
+    const distanceInKm = distanceInMeters / 1000;
+    const durationInSeconds = element.duration.value;
+    
+    return {
+      distance: distanceInKm,
+      duration: durationInSeconds,
+      distanceText: element.distance.text,
+      durationText: element.duration.text,
+    };
   } catch (error) {
-    console.error("Google Distance Matrix API error:", error.message);
+    console.error(`      ❌ Google Distance Matrix API error: ${error.message}`);
+    if (error.response) {
+      console.error(`      📡 Response status: ${error.response.status}`);
+      console.error(`      📄 Response data:`, error.response.data);
+    }
+    console.error(`      📚 Stack:`, error.stack);
     return null;
   }
 };
