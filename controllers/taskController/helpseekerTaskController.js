@@ -392,8 +392,26 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
     
     // Create reverse mapping (helper -> tasks)
     const helperTasksKey = `helper:${nearestHelper.helperId}:associated_tasks`;
-    const existingTasks = await redis.get(helperTasksKey);
-    const tasksList = existingTasks ? JSON.parse(existingTasks) : [];
+    const existingTasksData = await redis.get(helperTasksKey);
+    
+    // Handle both string and object responses from Upstash Redis
+    let tasksList = [];
+    if (existingTasksData) {
+      if (typeof existingTasksData === 'string') {
+        try {
+          tasksList = JSON.parse(existingTasksData);
+        } catch (parseError) {
+          console.error(`   ⚠️ Failed to parse existing tasks, starting fresh:`, parseError.message);
+          tasksList = [];
+        }
+      } else if (Array.isArray(existingTasksData)) {
+        tasksList = existingTasksData;
+      } else {
+        console.error(`   ⚠️ Unexpected data type, starting fresh`);
+        tasksList = [];
+      }
+    }
+    
     console.log(`   Current tasks for helper: ${tasksList.length}`);
     
     if (!tasksList.includes(taskId)) {
