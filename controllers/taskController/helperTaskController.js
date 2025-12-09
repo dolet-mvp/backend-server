@@ -675,12 +675,8 @@ const rejectTask = async (req, res) => {
     const { taskId } = req.params;
     const { reason } = req.body;
 
-    if (!reason || reason.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a reason for rejecting this task",
-      });
-    }
+    // Reason is optional - can be submitted later
+    const rejectionReason = reason && reason.trim().length > 0 ? reason.trim() : 'No reason provided';
 
     const task = await Task.findByPk(taskId, {
       include: [
@@ -699,7 +695,7 @@ const rejectTask = async (req, res) => {
       });
     }
 
-    if (task.status !== "in_queue") {
+    if (task.status !== "in_queue" && task.status !== "published") {
       return res.status(400).json({
         success: false,
         message: "This task is no longer available",
@@ -711,8 +707,8 @@ const rejectTask = async (req, res) => {
       attributes: ["id", "fullName"],
     });
 
-    // Store rejection in Redis
-    const actions = await storeHelperAction(taskId, helperId, 'rejected', reason);
+    // Store rejection in Redis immediately (even without reason)
+    const actions = await storeHelperAction(taskId, helperId, 'rejected', rejectionReason);
     
     // Remove this helper from task associations
     try {
@@ -842,11 +838,11 @@ const rejectTask = async (req, res) => {
       message: "Task rejected successfully",
       data: {
         taskId: task.id,
-        reason: reason,
+        reason: rejectionReason,
         rejectionCount,
         totalActions,
         allHelpersActed,
-        message: allHelpersActed ? "All available helpers have been shown this task. Consider increasing the reward or canceling." : "Task will be shown to other nearby helpers.",
+        message: allHelpersActed ? "All available helpers have been shown this task. Consider increasing the reward or canceling." : "Task rejected and reassigned to nearest available helper.",
       },
     });
   } catch (error) {
@@ -854,6 +850,89 @@ const rejectTask = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to reject task",
+      error: error.message,
+    });
+  }
+};
+
+// Update rejection reason later
+const updateRejectionReason = async (req, res) => {
+  try {
+    const helperId = req.user.id;
+    const { taskId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a reason for rejection",
+      });
+    }
+
+    // Check if helper has rejected this task
+    const actionsKey = `task:${taskId}:actions`;
+    const actionsData = await redis.get(actionsKey);
+    
+    if (!actionsData) {
+      return res.status(404).json({
+        success: false,
+        message: "No rejection record found for this task",
+      });
+    }
+
+    const actions = JSON.parse(actionsData);
+    const helperAction = actions.find(a => a.helperId === helperId && a.action === 'rejected');
+    
+    if (!helperAction) {
+      return res.status(404).json({
+        success: false,
+        message: "You have not rejected this task",
+      });
+    }
+
+    // Update the reason
+    helperAction.reason = reason.trim();
+    helperAction.reasonUpdatedAt = new Date().toISOString();
+    
+    await redis.set(actionsKey, JSON.stringify(actions));
+    await redis.expire(actionsKey, 86400); // 24 hours
+
+    // Get task details for notification
+    const task = await Task.findByPk(taskId, {
+      attributes: ['id', 'title', 'helpseekerId'],
+    });
+
+    if (task) {
+      // Update notification to helpseeker with the reason
+      const helper = await Helper.findByPk(helperId, {
+        attributes: ["id", "fullName"],
+      });
+
+      await Notification.create({
+        helpseekerId: task.helpseekerId,
+        userType: 'helpseeker',
+        taskId: task.id,
+        title: "Task Rejection Reason Updated",
+        message: `${helper.fullName} has provided a reason for declining "${task.title}": ${reason}`,
+        type: "general",
+        priority: "medium",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Rejection reason updated successfully",
+      data: {
+        taskId,
+        reason: reason.trim(),
+        updatedAt: helperAction.reasonUpdatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Update rejection reason error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update rejection reason",
       error: error.message,
     });
   }
@@ -1208,6 +1287,7 @@ module.exports = {
   getAvailableTasks,
   acceptTask,
   rejectTask,
+  updateRejectionReason,
   passTask,
   verifyOTPAndStartTask,
   getMyAcceptedTasks,

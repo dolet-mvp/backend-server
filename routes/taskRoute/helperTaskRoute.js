@@ -5,6 +5,7 @@ const {
   getAvailableTasks,
   acceptTask,
   rejectTask,
+  updateRejectionReason,
   passTask,
   verifyOTPAndStartTask,
   getMyAcceptedTasks,
@@ -29,12 +30,20 @@ router.post(
   acceptTask
 );
 
-// Reject task with reason
+// Reject task immediately (reason is optional, can be added later)
 router.post(
   "/:taskId/reject",
   checkForAuthenticationCookie(),
   checkUserType(["helper", "helpseeker"]),
   rejectTask
+);
+
+// Update rejection reason later
+router.patch(
+  "/:taskId/reject/reason",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  updateRejectionReason
 );
 
 // Pass on a task (skip without explicit rejection)
