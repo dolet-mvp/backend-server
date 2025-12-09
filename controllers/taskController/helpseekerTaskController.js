@@ -448,7 +448,16 @@ const publishTask = async (req, res) => {
     const { taskId } = req.params;
     const helpseekerId = req.user.id;
 
-    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
+    const task = await Task.findOne({ 
+      where: { id: taskId, helpseekerId },
+      include: [
+        {
+          model: Helpseeker,
+          as: "creator",
+          attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
+        },
+      ],
+    });
 
     if (!task) {
       return res.status(404).json({
@@ -481,6 +490,13 @@ const publishTask = async (req, res) => {
       const jobData = {
         taskId: task.id,
         helpseekerId: helpseekerId,
+        creator: {
+          id: task.creator.id,
+          fullName: task.creator.fullName,
+          email: task.creator.email,
+          phone: task.creator.phone,
+          profilePhoto: task.creator.profilePhoto,
+        },
         title: task.title,
         description: task.description,
         category: task.category,
@@ -531,6 +547,19 @@ const publishTask = async (req, res) => {
           console.log(`   Helper: ${associatedHelpers[0].helperName || associatedHelpers[0].helperId}`);
           console.log(`   Distance: ${associatedHelpers[0].distanceText}`);
           console.log(`   ETA: ${associatedHelpers[0].durationText}`);
+          
+          // Update Redis job data with distance information
+          jobData.distanceFromHelper = {
+            helperId: associatedHelpers[0].helperId,
+            helperName: associatedHelpers[0].helperName,
+            distance: associatedHelpers[0].distance,
+            distanceText: associatedHelpers[0].distanceText,
+            duration: associatedHelpers[0].duration,
+            durationText: associatedHelpers[0].durationText,
+          };
+          
+          await redis.setex(`job:${task.id}`, 2592000, JSON.stringify(jobData));
+          console.log(`   ✅ Updated Redis with distance information`);
         } else {
           console.log(`\n⚠️ FINAL RESULT: No helpers associated with task ${task.id}`);
         }
