@@ -4,6 +4,109 @@ const Task = require("../../models/taskModel/taskModel");
 const Rating = require("../../models/ratingModel/ratingModel");
 const Address = require("../../models/addressModel/addressModel");
 const redis = require("../../config/redis/redis");
+const axios = require("axios");
+
+// Helper function to find and associate nearest available helper with a task
+const findAndAssociateNearestHelper = async (taskId, taskLocation, excludeHelperId = null) => {
+  try {
+    console.log(`\n🔍 Finding replacement helper for task ${taskId}...`);
+    
+    // Get all online helpers from Redis
+    const onlineHelperKeys = await redis.keys('helper:online:*');
+    
+    if (!onlineHelperKeys || onlineHelperKeys.length === 0) {
+      console.log('   ⚠️ No online helpers available');
+      return null;
+    }
+    
+    const helperPromises = onlineHelperKeys.map(key => redis.get(key));
+    const helpersData = await Promise.all(helperPromises);
+    
+    const validHelpers = helpersData
+      .filter(data => data !== null)
+      .map(data => typeof data === 'string' ? JSON.parse(data) : data)
+      .filter(helper => helper.id !== excludeHelperId); // Exclude the helper going offline
+    
+    if (validHelpers.length === 0) {
+      console.log('   ⚠️ No other online helpers available');
+      return null;
+    }
+    
+    console.log(`   Found ${validHelpers.length} available helper(s)`);
+    
+    // Calculate distances using Google Maps API
+    const helperLocations = [];
+    const helperIds = [];
+    
+    for (const helper of validHelpers) {
+      const address = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
+      if (address && address.latitude && address.longitude) {
+        helperLocations.push({ lat: parseFloat(address.latitude), lng: parseFloat(address.longitude) });
+        helperIds.push(helper.id);
+      }
+    }
+    
+    if (helperLocations.length === 0) {
+      console.log('   ⚠️ No helpers with valid addresses');
+      return null;
+    }
+    
+    // Get distances using batch API call
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      console.log('   ⚠️ Google Maps API key not found');
+      return null;
+    }
+    
+    const originStr = `${taskLocation.lat},${taskLocation.lng}`;
+    const destinationsStr = helperLocations.map(loc => `${loc.lat},${loc.lng}`).join('|');
+    
+    try {
+      const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
+        params: {
+          origins: originStr,
+          destinations: destinationsStr,
+          key: apiKey,
+          mode: 'driving',
+          units: 'metric',
+        },
+      });
+      
+      if (response.data.status === 'OK') {
+        const elements = response.data.rows[0]?.elements || [];
+        const helpersWithDistance = [];
+        
+        for (let i = 0; i < elements.length; i++) {
+          if (elements[i].status === 'OK') {
+            const distanceKm = elements[i].distance.value / 1000;
+            if (distanceKm <= 50) { // Within 50km
+              helpersWithDistance.push({
+                helperId: helperIds[i],
+                distance: distanceKm,
+              });
+            }
+          }
+        }
+        
+        if (helpersWithDistance.length > 0) {
+          // Sort by distance and get nearest
+          helpersWithDistance.sort((a, b) => a.distance - b.distance);
+          const nearest = helpersWithDistance[0];
+          
+          console.log(`   ✅ Found replacement helper: ${nearest.helperId} (${nearest.distance.toFixed(2)}km)`);
+          return nearest.helperId;
+        }
+      }
+    } catch (apiError) {
+      console.warn(`   ⚠️ Google Maps API error:`, apiError.message);
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`   ❌ Error finding replacement helper:`, error.message);
+    return null;
+  }
+};
 
 
 // Get helper availability status
@@ -206,43 +309,84 @@ const toggleAvailability = async (req, res) => {
         },
       });
     } else {
-      // If helper goes offline, remove from Redis
-      await redis.del(`helper:online:${helper.id}`);
+      // If helper goes offline, remove from Redis and reassign their tasks
+      console.log(`\n📴 Helper ${helper.id} going offline...`);
       
-      // Remove from available helpers sorted set
+      await redis.del(`helper:online:${helper.id}`);
       await redis.zrem('helpers:available', helper.id);
       
-      // Remove helper from all task associations
+      // Get helper's associated tasks and reassign them
       try {
         const helperTasksKey = `helper:${helper.id}:associated_tasks`;
         const associatedTasksData = await redis.get(helperTasksKey);
         
+        let taskIds = [];
         if (associatedTasksData) {
-          const taskIds = JSON.parse(associatedTasksData);
+          if (typeof associatedTasksData === 'string') {
+            taskIds = JSON.parse(associatedTasksData);
+          } else if (Array.isArray(associatedTasksData)) {
+            taskIds = associatedTasksData;
+          }
+        }
+        
+        console.log(`   Helper has ${taskIds.length} associated task(s)`);
+        
+        // For each task, try to find a replacement helper
+        for (const taskId of taskIds) {
+          console.log(`\n   🔄 Reassigning task ${taskId}...`);
           
-          // Remove helper from each task's associated helpers list
-          for (const taskId of taskIds) {
-            const taskHelpersKey = `task:${taskId}:associated_helpers`;
-            const taskHelpersData = await redis.get(taskHelpersKey);
-            
-            if (taskHelpersData) {
-              const helpersList = JSON.parse(taskHelpersData);
-              const updatedList = helpersList.filter(id => id !== helper.id);
-              
-              if (updatedList.length > 0) {
-                await redis.setex(taskHelpersKey, 2592000, JSON.stringify(updatedList));
-              } else {
-                await redis.del(taskHelpersKey);
-              }
-            }
+          // Get task data from Redis
+          const taskData = await redis.get(`job:${taskId}`);
+          if (!taskData) {
+            console.log(`   ⚠️ Task ${taskId} not found in Redis`);
+            continue;
           }
           
-          // Clear helper's associated tasks
-          await redis.del(helperTasksKey);
-          console.log(`✅ Helper ${helper.id} removed from all task associations`);
+          const task = typeof taskData === 'string' ? JSON.parse(taskData) : taskData;
+          const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+          
+          if (!taskLocation || !taskLocation.lat || !taskLocation.lng) {
+            console.log(`   ⚠️ Task ${taskId} has no valid location`);
+            // Remove this helper from task association
+            await redis.del(`task:${taskId}:associated_helpers`);
+            continue;
+          }
+          
+          // Find replacement helper
+          const replacementHelperId = await findAndAssociateNearestHelper(taskId, taskLocation, helper.id);
+          
+          if (replacementHelperId) {
+            // Update task association with new helper
+            await redis.setex(`task:${taskId}:associated_helpers`, 2592000, JSON.stringify([replacementHelperId]));
+            
+            // Add task to new helper's list
+            const newHelperTasksKey = `helper:${replacementHelperId}:associated_tasks`;
+            const newHelperTasksData = await redis.get(newHelperTasksKey);
+            let newHelperTasks = [];
+            
+            if (newHelperTasksData) {
+              newHelperTasks = typeof newHelperTasksData === 'string' ? JSON.parse(newHelperTasksData) : newHelperTasksData;
+            }
+            
+            if (!newHelperTasks.includes(taskId)) {
+              newHelperTasks.push(taskId);
+              await redis.setex(newHelperTasksKey, 43200, JSON.stringify(newHelperTasks));
+            }
+            
+            console.log(`   ✅ Task ${taskId} reassigned to helper ${replacementHelperId}`);
+          } else {
+            // No replacement found, remove association
+            await redis.del(`task:${taskId}:associated_helpers`);
+            console.log(`   ⚠️ No replacement found for task ${taskId}, association removed`);
+          }
         }
+        
+        // Clear this helper's associated tasks
+        await redis.del(helperTasksKey);
+        console.log(`✅ Helper ${helper.id} removed from all task associations`);
+        
       } catch (cleanupError) {
-        console.warn(`⚠️ Failed to clean up helper associations:`, cleanupError.message);
+        console.error(`❌ Failed to reassign tasks:`, cleanupError.message);
       }
       
       console.log(`✅ Helper ${helper.id} marked as offline in Redis`);

@@ -174,104 +174,90 @@ const completeWork = async (req, res) => {
       // Continue execution even if Redis cleanup fails
     }
 
-    // Automatically set helper back to available/online
+    // Clean up task associations from Redis
     try {
-   const Address = require('../../models/addressModel/addressModel')
-    const helper = await Helper.findByPk(helperId, {
-      include: [
-        {
-          model: Address,
-          as: "addresses",
-          attributes: ["id", "street", "city", "state", "latitude", "longitude", "isDefault"],
-        },
-      ],
-    });
-
-    if (!helper) {
-      return res.status(404).json({
-        success: false,
-        message: "Helper not found",
-      });
+      console.log(`\n🧹 Cleaning up task associations for completed task ${taskId}...`);
+      
+      // Remove task's associated helpers
+      const taskHelpersKey = `task:${taskId}:associated_helpers`;
+      await redis.del(taskHelpersKey);
+      
+      // Remove task from helper's associated tasks list
+      const helperTasksKey = `helper:${helperId}:associated_tasks`;
+      const helperTasksData = await redis.get(helperTasksKey);
+      
+      if (helperTasksData) {
+        let taskIds = [];
+        if (typeof helperTasksData === 'string') {
+          taskIds = JSON.parse(helperTasksData);
+        } else if (Array.isArray(helperTasksData)) {
+          taskIds = helperTasksData;
+        }
+        
+        // Remove this task from helper's list
+        const updatedTaskIds = taskIds.filter(id => id !== taskId);
+        
+        if (updatedTaskIds.length > 0) {
+          await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedTaskIds));
+        } else {
+          await redis.del(helperTasksKey);
+        }
+      }
+      
+      // Remove task from published jobs
+      await redis.del(`job:${taskId}`);
+      
+      console.log(`✅ Task ${taskId} associations cleaned up from Redis`);
+    } catch (cleanupError) {
+      console.warn(`⚠️ Failed to clean up task associations:`, cleanupError.message);
+      // Continue execution even if cleanup fails
     }
 
-    // Toggle availability
-    helper.isAvailable = !helper.isAvailable;
-    await helper.save();
-
-    // If helper goes online, store in Redis
-    if (helper.isAvailable) {
-      const helperData = {
-        id: helper.id,
-        fullName: helper.fullName,
-        email: helper.email,
-        phone: helper.phone,
-        profilePhoto: helper.profilePhoto,
-        isAvailable: helper.isAvailable,
-        averageRating: helper.averageRating,
-        completedTasks: helper.completedTasks,
-        addresses: helper.addresses,
-        onlineAt: new Date().toISOString(),
-      };
-
-      // Upstash Redis automatically handles JSON serialization
-      await redis.set(`helper:online:${helper.id}`, helperData);
-      // Optional: Set expiration (e.g., 12 hours = 43200 seconds)
-      await redis.expire(`helper:online:${helper.id}`, 43200);
-      
-      // Add to sorted set for counting available helpers
-      // Using timestamp as score for ordering
-      await redis.zadd('helpers:available', {
-        score: Date.now(),
-        member: helper.id,
+    // Automatically set helper back to available if they were offline
+    try {
+      const Address = require('../../models/addressModel/addressModel');
+      const helper = await Helper.findByPk(helperId, {
+        include: [
+          {
+            model: Address,
+            as: "addresses",
+            attributes: ["id", "street", "city", "state", "latitude", "longitude", "isDefault"],
+          },
+        ],
       });
-      
-      console.log(`✅ Helper ${helper.id} marked as available in Redis`);
-      
-      // Broadcast helper online status
-      const socketService = require("../../services/socketService");
-      socketService.broadcastHelperStatusChange(helper.id, 'online', {
-        helper: {
+
+      if (helper && !helper.isAvailable) {
+        helper.isAvailable = true;
+        await helper.save();
+
+        // Store helper in Redis as available
+        const helperData = {
           id: helper.id,
           fullName: helper.fullName,
+          email: helper.email,
+          phone: helper.phone,
           profilePhoto: helper.profilePhoto,
+          isAvailable: helper.isAvailable,
           averageRating: helper.averageRating,
           completedTasks: helper.completedTasks,
-        },
-      });
-    } else {
-      // If helper goes offline, remove from Redis
-      await redis.del(`helper:online:${helper.id}`);
-      
-      // Remove from available helpers sorted set
-      await redis.zrem('helpers:available', helper.id);
-      
-      console.log(`✅ Helper ${helper.id} marked as offline in Redis`);
-      
-      // Broadcast helper offline status
-      const socketService = require("../../services/socketService");
-      socketService.broadcastHelperStatusChange(helper.id, 'offline', {
-        helper: {
-          id: helper.id,
-        },
-      });
-    }
+          addresses: helper.addresses,
+          onlineAt: new Date().toISOString(),
+        };
 
-    res.status(200).json({
-      success: true,
-      message: `You are now ${helper.isAvailable ? "online" : "offline"}`,
-      data: {
-        isAvailable: helper.isAvailable,
-        helper: helper,
-      },
-    });
-  } catch (error) {
-    console.error("Toggle availability error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to toggle availability",
-      error: error.message,
-    });
-  }
+        await redis.set(`helper:online:${helper.id}`, helperData);
+        await redis.expire(`helper:online:${helper.id}`, 43200);
+        
+        await redis.zadd('helpers:available', {
+          score: Date.now(),
+          member: helper.id,
+        });
+        
+        console.log(`✅ Helper ${helper.id} automatically set to available after task completion`);
+      }
+    } catch (helperUpdateError) {
+      console.warn(`⚠️ Failed to update helper availability:`, helperUpdateError.message);
+      // Continue execution even if helper update fails
+    }
 
     // Notify helpseeker
     await createNotification({
@@ -286,7 +272,7 @@ const completeWork = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Task completed successfully. You are now available for new tasks.",
+      message: "Task completed successfully",
       data: { 
         task: {
           id: task.id,
@@ -294,10 +280,6 @@ const completeWork = async (req, res) => {
           status: task.status,
           completedAt: task.completedAt,
           workDuration: workDuration,
-        },
-        helperStatus: {
-          isAvailable: true,
-          message: "You have been automatically set to available",
         }
       },
     });
