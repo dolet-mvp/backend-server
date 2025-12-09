@@ -218,7 +218,7 @@ const toggleAvailability = async (req, res) => {
       
       // Associate helper with the nearest available task using Google Maps API
       try {
-        const Task = require("../taskModel/taskModel");
+        const Task = require("../../models/taskModel/taskModel");
         const axios = require("axios");
         const allTaskKeys = await redis.keys('job:*');
         
