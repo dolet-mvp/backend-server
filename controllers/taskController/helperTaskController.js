@@ -877,7 +877,11 @@ const rejectTask = async (req, res) => {
               lat: parseFloat(helperAddress.latitude),
               lng: parseFloat(helperAddress.longitude)
             };
-            const searchRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
+            // Use max 100km to prevent associating with tasks too far away
+            const envRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
+            const searchRadius = Math.min(envRadius, 100);
+            
+            console.log(`   Using search radius: ${searchRadius}km (env: ${envRadius}km, max: 100km)`);
             
             // Use the new associateTasksWithHelper function
             const { associateTasksWithHelper } = require('./helpseekerTaskController');
@@ -1353,7 +1357,11 @@ const passTask = async (req, res) => {
               lat: parseFloat(helperAddress.latitude),
               lng: parseFloat(helperAddress.longitude)
             };
-            const searchRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
+            // Use max 100km to prevent associating with tasks too far away
+            const envRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
+            const searchRadius = Math.min(envRadius, 100);
+            
+            console.log(`   Using search radius: ${searchRadius}km (env: ${envRadius}km, max: 100km)`);
             
             // Use the new associateTasksWithHelper function (similar to how publishTask works)
             const { associateTasksWithHelper } = require('./helpseekerTaskController');

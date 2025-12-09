@@ -255,12 +255,20 @@ const hasHelperActedOnTask = async (taskId, helperId) => {
 // Helper function to find the nearest available helper and associate with task
 const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50) => {
   try {
+    // Enforce maximum radius of 100km to prevent unreasonable associations
+    const maxRadius = 100;
+    const effectiveRadius = Math.min(searchRadius, maxRadius);
+    
+    if (searchRadius > maxRadius) {
+      console.log(`⚠️ Search radius ${searchRadius}km exceeds maximum ${maxRadius}km, using ${effectiveRadius}km`);
+    }
+    
     console.log('\n========================================');
     console.log('🔗 STARTING HELPER ASSOCIATION');
     console.log('========================================');
     console.log(`📍 Task ID: ${taskId}`);
     console.log(`📍 Task Location: lat=${taskLocation.lat}, lng=${taskLocation.lng}`);
-    console.log(`📍 Search Radius: ${searchRadius}km`);
+    console.log(`📍 Search Radius: ${effectiveRadius}km (requested: ${searchRadius}km, max: ${maxRadius}km)`);
     console.log('----------------------------------------');
     
     // Get all online helpers from Redis
@@ -371,8 +379,8 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
         console.log(`      🚗 Road Distance: ${distanceText}`);
         console.log(`      ⏱️  Travel Time: ${durationText}`);
         
-        if (distance <= searchRadius) {
-          console.log(`      ✓ Within ${searchRadius}km radius - INCLUDED`);
+        if (distance <= effectiveRadius) {
+          console.log(`      ✓ Within ${effectiveRadius}km radius - INCLUDED`);
           helpersWithDistance.push({
             helperId: helper.id,
             helperName: helper.fullName,
@@ -382,7 +390,7 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
             durationText: durationText,
           });
         } else {
-          console.log(`      ✗ Beyond ${searchRadius}km radius - EXCLUDED`);
+          console.log(`      ✗ Beyond ${effectiveRadius}km radius - EXCLUDED`);
         }
       } else {
         // Fallback to Haversine
@@ -390,8 +398,8 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
         console.log(`\n   ⚠️ Helper: ${helper.fullName || helper.id}`);
         console.log(`      📏 Straight-line Distance: ${distance.toFixed(2)} km (Haversine fallback)`);
         
-        if (distance <= searchRadius) {
-          console.log(`      ✓ Within ${searchRadius}km radius - INCLUDED`);
+        if (distance <= effectiveRadius) {
+          console.log(`      ✓ Within ${effectiveRadius}km radius - INCLUDED`);
           helpersWithDistance.push({
             helperId: helper.id,
             helperName: helper.fullName,
@@ -401,7 +409,7 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
             durationText: 'N/A',
           });
         } else {
-          console.log(`      ✗ Beyond ${searchRadius}km radius - EXCLUDED`);
+          console.log(`      ✗ Beyond ${effectiveRadius}km radius - EXCLUDED`);
         }
       }
     }
@@ -410,7 +418,7 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
     console.log('🔍 Step 5: Selecting nearest helper...');
     
     if (helpersWithDistance.length === 0) {
-      console.log(`❌ RESULT: No helpers found within ${searchRadius}km for task ${taskId}`);
+      console.log(`❌ RESULT: No helpers found within ${effectiveRadius}km for task ${taskId}`);
       console.log('========================================\n');
       return [];
     }
@@ -492,12 +500,20 @@ const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50)
 // Helper function to find and associate available tasks with a specific helper
 const associateTasksWithHelper = async (helperId, helperLocation, searchRadius = 50, excludeTaskIds = []) => {
   try {
+    // Enforce maximum radius of 100km to prevent unreasonable associations
+    const maxRadius = 100;
+    const effectiveRadius = Math.min(searchRadius, maxRadius);
+    
+    if (searchRadius > maxRadius) {
+      console.log(`⚠️ Search radius ${searchRadius}km exceeds maximum ${maxRadius}km, using ${effectiveRadius}km`);
+    }
+    
     console.log('\n========================================');
     console.log('🔗 FINDING AVAILABLE TASKS FOR HELPER');
     console.log('========================================');
     console.log(`👤 Helper ID: ${helperId}`);
     console.log(`📍 Helper Location: lat=${helperLocation.lat}, lng=${helperLocation.lng}`);
-    console.log(`📍 Search Radius: ${searchRadius}km`);
+    console.log(`📍 Search Radius: ${effectiveRadius}km (requested: ${searchRadius}km, max: ${maxRadius}km)`);
     console.log(`🚫 Excluded Tasks: ${excludeTaskIds.join(', ') || 'None'}`);
     console.log('----------------------------------------');
     
@@ -608,7 +624,7 @@ const associateTasksWithHelper = async (helperId, helperLocation, searchRadius =
         
         console.log(`   ✓ Task ${taskId}: ${distance.toFixed(2)}km (${Math.round(duration)} mins)`);
         
-        if (distance <= searchRadius) {
+        if (distance <= effectiveRadius) {
           tasksWithDistance.push({
             taskId: taskId,
             task: task,
@@ -625,7 +641,7 @@ const associateTasksWithHelper = async (helperId, helperLocation, searchRadius =
         
         console.log(`   ✓ Task ${taskId}: ${distance.toFixed(2)}km (straight-line)`);
         
-        if (distance <= searchRadius) {
+        if (distance <= effectiveRadius) {
           tasksWithDistance.push({
             taskId: taskId,
             task: task,
@@ -639,7 +655,7 @@ const associateTasksWithHelper = async (helperId, helperLocation, searchRadius =
     }
     
     if (tasksWithDistance.length === 0) {
-      console.log(`\n❌ RESULT: No tasks within ${searchRadius}km radius`);
+      console.log(`\n❌ RESULT: No tasks within ${effectiveRadius}km radius`);
       console.log('========================================\n');
       return [];
     }
