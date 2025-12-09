@@ -371,7 +371,8 @@ const updateLocation = async (req, res) => {
     if (!latitude || !longitude) {
       return res.status(400).json({
         success: false,
-        message: "Latitude and longitude are required",
+       
+       message: "Latitude and longitude are required",
       });
     }
 
