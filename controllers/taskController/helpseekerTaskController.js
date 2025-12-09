@@ -1321,9 +1321,67 @@ const cancelTask = async (req, res) => {
 
     // Remove from Redis cache when cancelled
     try {
+      console.log(`\n🗑️ Cleaning up cancelled task ${task.id} from Redis...`);
+      
+      // Remove published task
       await redis.del(`job:${task.id}`);
       await redis.zrem('jobs:published', `job:${task.id}`);
-      console.log(`✅ Cancelled task ${task.id} removed from Redis`);
+      
+      // Remove task's associated helpers
+      const taskHelpersKey = `task:${task.id}:associated_helpers`;
+      const taskHelpersData = await redis.get(taskHelpersKey);
+      
+      if (taskHelpersData) {
+        let helperIds = [];
+        if (typeof taskHelpersData === 'string') {
+          helperIds = JSON.parse(taskHelpersData);
+        } else if (Array.isArray(taskHelpersData)) {
+          helperIds = taskHelpersData;
+        }
+        
+        console.log(`   Found ${helperIds.length} associated helper(s)`);
+        
+        // Remove task from each helper's associated tasks list
+        for (const helperId of helperIds) {
+          const helperTasksKey = `helper:${helperId}:associated_tasks`;
+          const helperTasksData = await redis.get(helperTasksKey);
+          
+          if (helperTasksData) {
+            let taskIds = [];
+            if (typeof helperTasksData === 'string') {
+              taskIds = JSON.parse(helperTasksData);
+            } else if (Array.isArray(helperTasksData)) {
+              taskIds = helperTasksData;
+            }
+            
+            // Remove this task from helper's list
+            const updatedTaskIds = taskIds.filter(id => id !== task.id);
+            
+            if (updatedTaskIds.length > 0) {
+              await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedTaskIds));
+            } else {
+              await redis.del(helperTasksKey);
+            }
+            
+            console.log(`   ✅ Removed task from helper ${helperId}'s associations`);
+          }
+        }
+        
+        // Delete task's associated helpers list
+        await redis.del(taskHelpersKey);
+      }
+      
+      // Remove tracking keys if they exist
+      if (task.assignedHelperId) {
+        await redis.del(`tracking:task:${task.id}:helper:${task.assignedHelperId}`);
+        await redis.del(`tracking:task:${task.id}:helpseeker:${helpseekerId}`);
+        console.log(`   ✅ Removed tracking keys for assigned helper`);
+      }
+      
+      // Remove task actions (rejections/passes)
+      await redis.del(`task:${task.id}:actions`);
+      
+      console.log(`✅ Cancelled task ${task.id} and all associations removed from Redis`);
     } catch (redisError) {
       console.warn(`⚠️ Failed to remove cancelled task from Redis:`, redisError.message);
     }
