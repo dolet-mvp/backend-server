@@ -146,13 +146,9 @@ app.use(
   diagnosticRoutes
 );
 
-// Report routes
-app.use(
-  "/api/reports",
-  reportRoutes
-);
 
-// Support routes
+
+// Report routes
 app.use(
   "/api/reports",
   reportRoutes
