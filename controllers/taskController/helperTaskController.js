@@ -7,6 +7,7 @@ const Address = require("../../models/addressModel/addressModel");
 const redis = require("../../config/redis/redis");
 const axios = require("axios");
 const { findAndAssociateNearestHelper } = require("../helperController/helperController");
+const { getGoogleMapsDistances } = require("./helpseekerTaskController");
 
 // Generate 6-digit OTP
 const generateOTP = () => {

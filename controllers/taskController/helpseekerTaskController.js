@@ -1563,5 +1563,5 @@ module.exports = {
   cancelTask,
   increaseReward,
   regenerateOTP,
-
+  getGoogleMapsDistances,
 };
