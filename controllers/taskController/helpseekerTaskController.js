@@ -349,11 +349,15 @@ const publishTask = async (req, res) => {
       
       console.log(`✅ Job ${task.id} stored in Redis successfully`);
       
-      // Associate nearby available helpers with this task
+      // Associate nearest available helper with this task
       const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
       if (taskLocation && taskLocation.lat && taskLocation.lng) {
-        const associatedHelpers = await associateHelpersWithTask(task.id, taskLocation, 10, 50);
-        console.log(`✅ Task ${task.id} associated with ${associatedHelpers.length} nearby helpers`);
+        console.log(`🔍 Attempting to associate helper for task ${task.id}...`);
+        const associatedHelpers = await associateHelpersWithTask(task.id, taskLocation);
+        console.log(`✅ Task ${task.id} associated with ${associatedHelpers.length} helper(s)`);
+        if (associatedHelpers.length > 0) {
+          console.log(`   Helper: ${associatedHelpers[0].helperName} (${associatedHelpers[0].distanceText}, ETA: ${associatedHelpers[0].durationText})`);
+        }
       } else {
         console.log(`⚠️ Task ${task.id} has no location, skipping helper association`);
       }
