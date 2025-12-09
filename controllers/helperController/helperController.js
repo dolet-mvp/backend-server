@@ -394,10 +394,52 @@ const getAvailableHelpersCount = async (req, res) => {
   }
 };
 
+// Debug endpoint to check Redis state
+const debugRedisState = async (req, res) => {
+  try {
+    const { taskId } = req.query;
+    
+    const result = {
+      timestamp: new Date().toISOString(),
+    };
+    
+    // Get online helpers
+    const onlineHelperKeys = await redis.keys('helper:online:*');
+    result.onlineHelpersCount = onlineHelperKeys ? onlineHelperKeys.length : 0;
+    result.onlineHelperIds = onlineHelperKeys ? onlineHelperKeys.map(key => key.replace('helper:online:', '')) : [];
+    
+    // If taskId provided, get task associations
+    if (taskId) {
+      const jobData = await redis.get(`job:${taskId}`);
+      result.task = jobData ? (typeof jobData === 'string' ? JSON.parse(jobData) : jobData) : null;
+      
+      const associatedHelpersData = await redis.get(`task:${taskId}:associated_helpers`);
+      result.associatedHelpers = associatedHelpersData ? JSON.parse(associatedHelpersData) : null;
+    }
+    
+    // Get total jobs in queue
+    const allJobKeys = await redis.keys('job:*');
+    result.totalJobsInQueue = allJobKeys ? allJobKeys.length : 0;
+    
+    res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Debug Redis state error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to debug Redis state",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAvailabilityStatus,
   toggleAvailability,
   getHelperCompletedTasks,
   getHelperActiveTasks,
   getAvailableHelpersCount,
+  debugRedisState,
 };

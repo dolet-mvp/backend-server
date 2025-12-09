@@ -6,6 +6,7 @@ const {
   getHelperCompletedTasks,
   getHelperActiveTasks,
   getAvailableHelpersCount,
+  debugRedisState,
 } = require("../../controllers/helperController/helperController");
 const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
 
@@ -32,6 +33,12 @@ router.get(
   checkForAuthenticationCookie(),
   checkUserType(["helpseeker", "admin","helper"]),
   getAvailableHelpersCount
+);
+
+// Debug Redis state
+router.get(
+  "/debug/redis",
+  debugRedisState
 );
 
 // Helper tasks
