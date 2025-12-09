@@ -1163,7 +1163,9 @@ const passTask = async (req, res) => {
       const associatedTasksData = await redis.get(helperTasksKey);
       
       if (associatedTasksData) {
-        const tasksList = JSON.parse(associatedTasksData);
+        const tasksList = typeof associatedTasksData === 'string' 
+          ? JSON.parse(associatedTasksData) 
+          : associatedTasksData;
         const updatedList = tasksList.filter(id => id !== taskId);
         
         if (updatedList.length > 0) {
@@ -1177,7 +1179,9 @@ const passTask = async (req, res) => {
       const taskHelpersData = await redis.get(taskHelpersKey);
       
       if (taskHelpersData) {
-        const helpersList = JSON.parse(taskHelpersData);
+        const helpersList = typeof taskHelpersData === 'string' 
+          ? JSON.parse(taskHelpersData) 
+          : taskHelpersData;
         const updatedHelpers = helpersList.filter(id => id !== helperId);
         
         if (updatedHelpers.length > 0) {
