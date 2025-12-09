@@ -113,6 +113,87 @@ const toggleAvailability = async (req, res) => {
       
       console.log(`✅ Helper ${helper.id} marked as available in Redis`);
       
+      // Associate helper with the nearest available task using Google Maps API
+      try {
+        const Task = require("../taskModel/taskModel");
+        const axios = require("axios");
+        const allTaskKeys = await redis.keys('job:*');
+        
+        if (allTaskKeys && allTaskKeys.length > 0) {
+          const tasksPromises = allTaskKeys.map(key => redis.get(key));
+          const tasksData = await Promise.all(tasksPromises);
+          
+          const helperAddress = helper.addresses.find(addr => addr.isDefault) || helper.addresses[0];
+          
+          if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+            const tasksWithDistance = [];
+            
+            // Calculate distance for each task using Google Maps API
+            for (const taskData of tasksData) {
+              if (!taskData) continue;
+              
+              const task = typeof taskData === 'string' ? JSON.parse(taskData) : taskData;
+              const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+              
+              if (taskLocation && taskLocation.lat && taskLocation.lng) {
+                // Use Google Maps Distance Matrix API
+                try {
+                  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+                  
+                  if (apiKey) {
+                    const url = `https://maps.googleapis.com/maps/api/distancematrix/json`;
+                    const response = await axios.get(url, {
+                      params: {
+                        origins: `${helperAddress.latitude},${helperAddress.longitude}`,
+                        destinations: `${taskLocation.lat},${taskLocation.lng}`,
+                        key: apiKey,
+                        units: 'metric',
+                      },
+                    });
+                    
+                    if (response.data.status === 'OK' && 
+                        response.data.rows[0]?.elements[0]?.status === 'OK') {
+                      const distanceInMeters = response.data.rows[0].elements[0].distance.value;
+                      const distanceInKm = distanceInMeters / 1000;
+                      
+                      if (distanceInKm <= 50) {
+                        tasksWithDistance.push({
+                          taskId: task.taskId || task.id,
+                          distance: distanceInKm,
+                        });
+                      }
+                    }
+                  }
+                } catch (apiError) {
+                  console.warn(`⚠️ Failed to calculate distance for task:`, apiError.message);
+                }
+              }
+            }
+            
+            // If found tasks within range, associate with the nearest one
+            if (tasksWithDistance.length > 0) {
+              tasksWithDistance.sort((a, b) => a.distance - b.distance);
+              const nearestTask = tasksWithDistance[0];
+              const taskId = nearestTask.taskId;
+              
+              // Add helper to task's associated helpers (replace existing)
+              const taskHelpersKey = `task:${taskId}:associated_helpers`;
+              await redis.setex(taskHelpersKey, 2592000, JSON.stringify([helper.id]));
+              
+              // Add task to helper's associated tasks
+              const helperTasksKey = `helper:${helper.id}:associated_tasks`;
+              await redis.setex(helperTasksKey, 43200, JSON.stringify([taskId]));
+              
+              console.log(`✅ Helper ${helper.id} associated with nearest task ${taskId} (${nearestTask.distance.toFixed(2)}km)`);
+            } else {
+              console.log(`⚠️ No tasks found within 50km for helper ${helper.id}`);
+            }
+          }
+        }
+      } catch (associationError) {
+        console.warn(`⚠️ Failed to associate helper with tasks:`, associationError.message);
+      }
+      
       // Broadcast helper online status
       const socketService = require("../../services/socketService");
       socketService.broadcastHelperStatusChange(helper.id, 'online', {
@@ -130,6 +211,39 @@ const toggleAvailability = async (req, res) => {
       
       // Remove from available helpers sorted set
       await redis.zrem('helpers:available', helper.id);
+      
+      // Remove helper from all task associations
+      try {
+        const helperTasksKey = `helper:${helper.id}:associated_tasks`;
+        const associatedTasksData = await redis.get(helperTasksKey);
+        
+        if (associatedTasksData) {
+          const taskIds = JSON.parse(associatedTasksData);
+          
+          // Remove helper from each task's associated helpers list
+          for (const taskId of taskIds) {
+            const taskHelpersKey = `task:${taskId}:associated_helpers`;
+            const taskHelpersData = await redis.get(taskHelpersKey);
+            
+            if (taskHelpersData) {
+              const helpersList = JSON.parse(taskHelpersData);
+              const updatedList = helpersList.filter(id => id !== helper.id);
+              
+              if (updatedList.length > 0) {
+                await redis.setex(taskHelpersKey, 2592000, JSON.stringify(updatedList));
+              } else {
+                await redis.del(taskHelpersKey);
+              }
+            }
+          }
+          
+          // Clear helper's associated tasks
+          await redis.del(helperTasksKey);
+          console.log(`✅ Helper ${helper.id} removed from all task associations`);
+        }
+      } catch (cleanupError) {
+        console.warn(`⚠️ Failed to clean up helper associations:`, cleanupError.message);
+      }
       
       console.log(`✅ Helper ${helper.id} marked as offline in Redis`);
       

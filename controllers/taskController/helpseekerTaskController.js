@@ -163,6 +163,130 @@ const createTask = async (req, res) => {
   }
 };
 
+// Helper function to calculate distance using Google Maps Distance Matrix API
+const calculateDistanceWithGoogle = async (origin, destination) => {
+  try {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    
+    if (!apiKey) {
+      console.warn("Google Maps API key not found");
+      return null;
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/distancematrix/json`;
+    const response = await axios.get(url, {
+      params: {
+        origins: `${origin.lat},${origin.lng}`,
+        destinations: `${destination.lat},${destination.lng}`,
+        key: apiKey,
+        units: 'metric',
+      },
+    });
+
+    if (response.data.status === 'OK' && 
+        response.data.rows[0]?.elements[0]?.status === 'OK') {
+      const distanceInMeters = response.data.rows[0].elements[0].distance.value;
+      const distanceInKm = distanceInMeters / 1000;
+      const durationInSeconds = response.data.rows[0].elements[0].duration.value;
+      
+      return {
+        distance: distanceInKm,
+        duration: durationInSeconds,
+        distanceText: response.data.rows[0].elements[0].distance.text,
+        durationText: response.data.rows[0].elements[0].duration.text,
+      };
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Google Distance Matrix API error:", error.message);
+    return null;
+  }
+};
+
+// Helper function to find the nearest available helper and associate with task
+const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50) => {
+  try {
+    console.log(`🔗 Finding nearest helper for task ${taskId}...`);
+    
+    // Get all online helpers from Redis
+    const onlineHelperKeys = await redis.keys('helper:online:*');
+    
+    if (!onlineHelperKeys || onlineHelperKeys.length === 0) {
+      console.log('⚠️ No online helpers found');
+      return [];
+    }
+    
+    const helperPromises = onlineHelperKeys.map(key => redis.get(key));
+    const helpersData = await Promise.all(helperPromises);
+    
+    const helpersWithDistance = [];
+    
+    // Calculate distance for each helper using Google Maps API
+    for (const helperData of helpersData) {
+      if (!helperData) continue;
+      
+      const helper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
+      
+      // Get helper location from addresses
+      if (helper.addresses && helper.addresses.length > 0) {
+        const address = helper.addresses.find(addr => addr.isDefault) || helper.addresses[0];
+        
+        if (address && address.latitude && address.longitude && taskLocation && taskLocation.lat && taskLocation.lng) {
+          // Use Google Maps API for accurate road distance
+          const distanceData = await calculateDistanceWithGoogle(
+            { lat: address.latitude, lng: address.longitude },
+            { lat: taskLocation.lat, lng: taskLocation.lng }
+          );
+          
+          if (distanceData && distanceData.distance <= searchRadius) {
+            helpersWithDistance.push({
+              helperId: helper.id,
+              distance: distanceData.distance,
+              duration: distanceData.duration,
+              distanceText: distanceData.distanceText,
+              durationText: distanceData.durationText,
+              helperName: helper.fullName,
+            });
+          }
+        }
+      }
+    }
+    
+    if (helpersWithDistance.length === 0) {
+      console.log(`⚠️ No helpers found within ${searchRadius}km for task ${taskId}`);
+      return [];
+    }
+    
+    // Sort by distance and take only the nearest helper
+    helpersWithDistance.sort((a, b) => a.distance - b.distance);
+    const nearestHelper = helpersWithDistance[0];
+    
+    // Store association in Redis (only 1 helper)
+    const associationKey = `task:${taskId}:associated_helpers`;
+    const helperIds = [nearestHelper.helperId];
+    
+    await redis.setex(associationKey, 2592000, JSON.stringify(helperIds)); // 30 days
+    
+    // Create reverse mapping (helper -> tasks)
+    const helperTasksKey = `helper:${nearestHelper.helperId}:associated_tasks`;
+    const existingTasks = await redis.get(helperTasksKey);
+    const tasksList = existingTasks ? JSON.parse(existingTasks) : [];
+    
+    if (!tasksList.includes(taskId)) {
+      tasksList.push(taskId);
+      await redis.setex(helperTasksKey, 43200, JSON.stringify(tasksList)); // 12 hours
+    }
+    
+    console.log(`✅ Task ${taskId} associated with nearest helper: ${nearestHelper.helperName} (${nearestHelper.distanceText}, ${nearestHelper.durationText})`);
+    
+    return [nearestHelper];
+  } catch (error) {
+    console.error('❌ Error associating helpers with task:', error);
+    return [];
+  }
+};
+
 const publishTask = async (req, res) => {
   try {
     const { taskId } = req.params;
@@ -224,6 +348,15 @@ const publishTask = async (req, res) => {
       });
       
       console.log(`✅ Job ${task.id} stored in Redis successfully`);
+      
+      // Associate nearby available helpers with this task
+      const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+      if (taskLocation && taskLocation.lat && taskLocation.lng) {
+        const associatedHelpers = await associateHelpersWithTask(task.id, taskLocation, 10, 50);
+        console.log(`✅ Task ${task.id} associated with ${associatedHelpers.length} nearby helpers`);
+      } else {
+        console.log(`⚠️ Task ${task.id} has no location, skipping helper association`);
+      }
     } catch (redisError) {
       console.error(`⚠️ Failed to store job in Redis:`, redisError);
       // Continue execution even if Redis fails

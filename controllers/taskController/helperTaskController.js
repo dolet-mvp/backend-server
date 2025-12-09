@@ -262,8 +262,19 @@ const getAvailableTasks = async (req, res) => {
     
     console.log(`✅ ${validTasks.length} valid tasks after database validation`);
 
-    // Use validated Redis tasks only
-    const tasksToProcess = validTasks;
+    // Filter tasks to only show those associated with this helper
+    const helperTasksKey = `helper:${helperId}:associated_tasks`;
+    const associatedTasksData = await redis.get(helperTasksKey);
+    const associatedTaskIds = associatedTasksData ? JSON.parse(associatedTasksData) : [];
+    
+    console.log(`📋 Helper ${helperId} has ${associatedTaskIds.length} associated tasks`);
+    
+    const tasksToProcess = validTasks.filter(task => {
+      const taskId = task.taskId || task.id;
+      return associatedTaskIds.includes(taskId);
+    });
+    
+    console.log(`✅ ${tasksToProcess.length} tasks match helper's associations`);
 
     // Filter out tasks this helper has already rejected or passed
     const availableTasksForHelper = [];
@@ -703,6 +714,108 @@ const rejectTask = async (req, res) => {
     // Store rejection in Redis
     const actions = await storeHelperAction(taskId, helperId, 'rejected', reason);
     
+    // Remove this helper from task associations
+    try {
+      const helperTasksKey = `helper:${helperId}:associated_tasks`;
+      const associatedTasksData = await redis.get(helperTasksKey);
+      
+      if (associatedTasksData) {
+        const tasksList = JSON.parse(associatedTasksData);
+        const updatedList = tasksList.filter(id => id !== taskId);
+        
+        if (updatedList.length > 0) {
+          await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedList));
+        } else {
+          await redis.del(helperTasksKey);
+        }
+      }
+      
+      const taskHelpersKey = `task:${taskId}:associated_helpers`;
+      const taskHelpersData = await redis.get(taskHelpersKey);
+      
+      if (taskHelpersData) {
+        const helpersList = JSON.parse(taskHelpersData);
+        const updatedHelpers = helpersList.filter(id => id !== helperId);
+        
+        if (updatedHelpers.length > 0) {
+          await redis.setex(taskHelpersKey, 2592000, JSON.stringify(updatedHelpers));
+        } else {
+          await redis.del(taskHelpersKey);
+        }
+      }
+      
+      console.log(`✅ Helper ${helperId} removed from task ${taskId} associations after rejection`);
+      
+      // Find and associate the nearest available helper using Google Maps API
+      if (task.location || (task.steps && task.steps[0] && task.steps[0].location)) {
+        const taskLocation = task.location || task.steps[0].location;
+        const onlineHelperKeys = await redis.keys('helper:online:*');
+        const helpersWithDistance = [];
+        
+        for (const helperKey of onlineHelperKeys) {
+          const helperData = await redis.get(helperKey);
+          if (!helperData) continue;
+          
+          const onlineHelper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
+          
+          // Skip if this helper has already acted on this task
+          const hasActed = actions.some(a => a.helperId === onlineHelper.id);
+          if (hasActed || onlineHelper.id === helperId) continue;
+          
+          // Skip if already associated
+          const alreadyAssociated = updatedHelpers && updatedHelpers.includes(onlineHelper.id);
+          if (alreadyAssociated) continue;
+          
+          // Calculate distance using Google Maps API
+          if (onlineHelper.addresses && onlineHelper.addresses.length > 0) {
+            const address = onlineHelper.addresses.find(addr => addr.isDefault) || onlineHelper.addresses[0];
+            
+            if (address && address.latitude && address.longitude) {
+              try {
+                const distanceData = await calculateDistanceWithGoogle(
+                  { lat: address.latitude, lng: address.longitude },
+                  { lat: taskLocation.lat, lng: taskLocation.lng }
+                );
+                
+                if (distanceData && distanceData.distance <= 50) {
+                  helpersWithDistance.push({
+                    helperId: onlineHelper.id,
+                    distance: distanceData.distance,
+                  });
+                }
+              } catch (apiError) {
+                console.warn(`⚠️ Failed to calculate distance for helper ${onlineHelper.id}:`, apiError.message);
+              }
+            }
+          }
+        }
+        
+        // If found helpers, associate with the nearest one
+        if (helpersWithDistance.length > 0) {
+          helpersWithDistance.sort((a, b) => a.distance - b.distance);
+          const nearestHelper = helpersWithDistance[0];
+          
+          // Associate only the nearest helper with the task
+          await redis.setex(taskHelpersKey, 2592000, JSON.stringify([nearestHelper.helperId]));
+          
+          const newHelperTasksKey = `helper:${nearestHelper.helperId}:associated_tasks`;
+          const newHelperTasks = await redis.get(newHelperTasksKey);
+          const newTasksList = newHelperTasks ? JSON.parse(newHelperTasks) : [];
+          
+          if (!newTasksList.includes(taskId)) {
+            newTasksList.push(taskId);
+            await redis.setex(newHelperTasksKey, 43200, JSON.stringify(newTasksList));
+          }
+          
+          console.log(`✅ Task ${taskId} reassigned to nearest helper ${nearestHelper.helperId} (${nearestHelper.distance.toFixed(2)}km)`);
+        } else {
+          console.log(`⚠️ No available helpers found within 50km for task ${taskId}`);
+        }
+      }
+    } catch (reassignError) {
+      console.warn(`⚠️ Failed to reassign task:`, reassignError.message);
+    }
+    
     // Get all online helpers to check if all have rejected
     const onlineHelperKeys = await redis.keys('helper:online:*');
     const onlineHelperCount = onlineHelperKeys.length;
@@ -970,11 +1083,113 @@ const passTask = async (req, res) => {
     }
 
     // Store pass action in Redis
-    await storeHelperAction(taskId, helperId, 'passed', 'Helper passed on this task');
+    const actions = await storeHelperAction(taskId, helperId, 'passed', 'Helper passed on this task');
+    
+    // Remove this helper from task associations and reassign to another helper
+    try {
+      const helperTasksKey = `helper:${helperId}:associated_tasks`;
+      const associatedTasksData = await redis.get(helperTasksKey);
+      
+      if (associatedTasksData) {
+        const tasksList = JSON.parse(associatedTasksData);
+        const updatedList = tasksList.filter(id => id !== taskId);
+        
+        if (updatedList.length > 0) {
+          await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedList));
+        } else {
+          await redis.del(helperTasksKey);
+        }
+      }
+      
+      const taskHelpersKey = `task:${taskId}:associated_helpers`;
+      const taskHelpersData = await redis.get(taskHelpersKey);
+      
+      if (taskHelpersData) {
+        const helpersList = JSON.parse(taskHelpersData);
+        const updatedHelpers = helpersList.filter(id => id !== helperId);
+        
+        if (updatedHelpers.length > 0) {
+          await redis.setex(taskHelpersKey, 2592000, JSON.stringify(updatedHelpers));
+        } else {
+          await redis.del(taskHelpersKey);
+        }
+      }
+      
+      console.log(`✅ Helper ${helperId} removed from task ${taskId} associations after passing`);
+      
+      // Find and associate the nearest available helper using Google Maps API
+      if (task.location || (task.steps && task.steps[0] && task.steps[0].location)) {
+        const taskLocation = task.location || task.steps[0].location;
+        const onlineHelperKeys = await redis.keys('helper:online:*');
+        const helpersWithDistance = [];
+        
+        for (const helperKey of onlineHelperKeys) {
+          const helperData = await redis.get(helperKey);
+          if (!helperData) continue;
+          
+          const onlineHelper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
+          
+          // Skip if this helper has already acted on this task
+          const hasActed = actions.some(a => a.helperId === onlineHelper.id);
+          if (hasActed || onlineHelper.id === helperId) continue;
+          
+          // Skip if already associated
+          const alreadyAssociated = updatedHelpers && updatedHelpers.includes(onlineHelper.id);
+          if (alreadyAssociated) continue;
+          
+          // Calculate distance using Google Maps API
+          if (onlineHelper.addresses && onlineHelper.addresses.length > 0) {
+            const address = onlineHelper.addresses.find(addr => addr.isDefault) || onlineHelper.addresses[0];
+            
+            if (address && address.latitude && address.longitude) {
+              try {
+                const distanceData = await calculateDistanceWithGoogle(
+                  { lat: address.latitude, lng: address.longitude },
+                  { lat: taskLocation.lat, lng: taskLocation.lng }
+                );
+                
+                if (distanceData && distanceData.distance <= 50) {
+                  helpersWithDistance.push({
+                    helperId: onlineHelper.id,
+                    distance: distanceData.distance,
+                  });
+                }
+              } catch (apiError) {
+                console.warn(`⚠️ Failed to calculate distance for helper ${onlineHelper.id}:`, apiError.message);
+              }
+            }
+          }
+        }
+        
+        // If found helpers, associate with the nearest one
+        if (helpersWithDistance.length > 0) {
+          helpersWithDistance.sort((a, b) => a.distance - b.distance);
+          const nearestHelper = helpersWithDistance[0];
+          
+          // Associate only the nearest helper with the task
+          await redis.setex(taskHelpersKey, 2592000, JSON.stringify([nearestHelper.helperId]));
+          
+          const newHelperTasksKey = `helper:${nearestHelper.helperId}:associated_tasks`;
+          const newHelperTasks = await redis.get(newHelperTasksKey);
+          const newTasksList = newHelperTasks ? JSON.parse(newHelperTasks) : [];
+          
+          if (!newTasksList.includes(taskId)) {
+            newTasksList.push(taskId);
+            await redis.setex(newHelperTasksKey, 43200, JSON.stringify(newTasksList));
+          }
+          
+          console.log(`✅ Task ${taskId} reassigned to nearest helper ${nearestHelper.helperId} after pass (${nearestHelper.distance.toFixed(2)}km)`);
+        } else {
+          console.log(`⚠️ No available helpers found within 50km for task ${taskId}`);
+        }
+      }
+    } catch (reassignError) {
+      console.warn(`⚠️ Failed to reassign task:`, reassignError.message);
+    }
     
     res.status(200).json({
       success: true,
-      message: "Task marked as passed. It will be shown to other helpers.",
+      message: "Task marked as passed. It has been reassigned to another nearby helper.",
       data: {
         taskId: task.id,
       },
