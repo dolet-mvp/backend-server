@@ -83,14 +83,14 @@ const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
 const geminiRoutes = require("./routes/aiRoute/gemniRoute");
 const reportRoutes = require("./routes/reportRoute/reportRoute");
 const blockRoutes = require("./routes/blockRoute/blockRoute");
+const optionalAuthentication = require("./middleware/authMiddleware").optionalAuthentication;
 
 
 
 app.use("/api/auth", authRoutes);
 
-// This runs AFTER authentication routes but BEFORE all protected routes
+app.use(optionalAuthentication());
 app.use(checkUserBlocked);
-
 
 app.use("/api/ai", geminiRoutes);
 

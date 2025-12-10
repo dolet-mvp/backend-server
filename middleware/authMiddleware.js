@@ -42,6 +42,40 @@ function checkForAuthenticationCookie() {
 }
 
 
+function optionalAuthentication() {
+  return (req, res, next) => {
+    try {
+      let token;
+
+      // Extract token from Authorization header
+      if (req.headers.authorization) {
+        const authHeader = req.headers.authorization;
+        if (authHeader.startsWith("Bearer ")) {
+          token = authHeader.split(" ")[1];
+        }
+      }
+
+      // If no token, just continue without setting req.user
+      if (!token) {
+        return next();
+      }
+
+      // If token exists, validate it
+      const userPayload = validateToken(token);
+      if (userPayload) {
+        req.user = userPayload;
+      }
+      // Even if token is invalid, continue without req.user
+      
+      next();
+    } catch (error) {
+      // On error, continue without authentication
+      next();
+    }
+  };
+}
+
+
 function checkUserType(allowedTypes) {
   return (req, res, next) => {
     const types = Array.isArray(allowedTypes) ? allowedTypes : [allowedTypes];
@@ -64,8 +98,9 @@ function checkUserType(allowedTypes) {
   };
 }
 
-// Export both functions
+// Export all functions
 module.exports = {
   checkForAuthenticationCookie,
+  optionalAuthentication,
   checkUserType
 };
