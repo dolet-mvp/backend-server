@@ -233,6 +233,133 @@ const publishTask = async (req, res) => {
         console.error(`⚠️ Failed to broadcast job via socket:`, socketError.message);
         // Continue execution even if socket broadcast fails
       }
+
+      // Associate newly published task with online helpers asynchronously
+      if (task.location && task.location.lat && task.location.lng) {
+        setImmediate(async () => {
+          try {
+            const startTime = Date.now();
+            console.log(`🔗 [PUBLISH] Starting helper association for task ${task.id}`);
+            
+            // Get all online helpers from Redis
+            const onlineHelperKeys = await redis.keys('helper:online:*');
+            console.log(`🔗 [PUBLISH] Found ${onlineHelperKeys.length} online helpers`);
+            
+            if (onlineHelperKeys.length > 0) {
+              const helpersData = await Promise.all(
+                onlineHelperKeys.map(key => redis.get(key))
+              );
+              
+              const eligibleHelpers = [];
+              
+              // Check each helper for eligibility
+              for (const helperData of helpersData) {
+                if (!helperData) continue;
+                
+                const helper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
+                const helperId = helper.id;
+                
+                // Check if helper already acted on this task
+                const actionsData = await redis.get(`task:${task.id}:actions`);
+                if (actionsData) {
+                  const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
+                  if (actions.some(action => action.helperId === helperId)) {
+                    continue;
+                  }
+                }
+                
+                // Get helper's address
+                const helperAddress = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
+                if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+                  eligibleHelpers.push({
+                    helperId: helperId,
+                    latitude: helperAddress.latitude,
+                    longitude: helperAddress.longitude
+                  });
+                }
+              }
+              
+              console.log(`🔗 [PUBLISH] ${eligibleHelpers.length} eligible helpers for association`);
+              
+              if (eligibleHelpers.length > 0) {
+                // Calculate distances using Google Maps API
+                const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+                const axios = require('axios');
+                const helpersWithDistance = [];
+                
+                if (apiKey) {
+                  // Batch process helpers (25 at a time)
+                  const batchSize = 25;
+                  for (let i = 0; i < eligibleHelpers.length; i += batchSize) {
+                    const batch = eligibleHelpers.slice(i, i + batchSize);
+                    const originsStr = batch.map(h => `${h.latitude},${h.longitude}`).join('|');
+                    
+                    try {
+                      const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
+                        params: {
+                          origins: originsStr,
+                          destinations: `${task.location.lat},${task.location.lng}`,
+                          key: apiKey,
+                          units: 'metric',
+                        },
+                        timeout: 5000,
+                      });
+                      
+                      if (response.data.status === 'OK') {
+                        response.data.rows.forEach((row, index) => {
+                          if (row.elements[0] && row.elements[0].status === 'OK') {
+                            const distanceInKm = row.elements[0].distance.value / 1000;
+                            if (distanceInKm <= 50) {
+                              helpersWithDistance.push({
+                                helperId: batch[index].helperId,
+                                distance: distanceInKm
+                              });
+                            }
+                          }
+                        });
+                      }
+                    } catch (error) {
+                      console.warn(`⚠️ Batch distance calculation failed:`, error.message);
+                    }
+                  }
+                }
+                
+                console.log(`🔗 [PUBLISH] ${helpersWithDistance.length} helpers within 50km`);
+                
+                if (helpersWithDistance.length > 0) {
+                  // Sort by distance and get closest helper
+                  helpersWithDistance.sort((a, b) => a.distance - b.distance);
+                  const closestHelper = helpersWithDistance[0];
+                  
+                  // Associate task with closest helper
+                  await redis.setex(
+                    `task:${task.id}:associated_helpers`,
+                    2592000,
+                    JSON.stringify([closestHelper.helperId])
+                  );
+                  
+                  // Add to helper's associated tasks
+                  const helperTasksKey = `helper:${closestHelper.helperId}:associated_tasks`;
+                  const existingTasks = await redis.get(helperTasksKey);
+                  let taskIds = existingTasks 
+                    ? (typeof existingTasks === 'string' ? JSON.parse(existingTasks) : existingTasks)
+                    : [];
+                  
+                  if (!taskIds.includes(task.id)) {
+                    taskIds.push(task.id);
+                    await redis.setex(helperTasksKey, 43200, JSON.stringify(taskIds));
+                  }
+                  
+                  console.log(`✅ [PUBLISH] Task ${task.id} associated with helper ${closestHelper.helperId} (${closestHelper.distance.toFixed(2)}km)`);
+                  console.log(`⏱️ [PUBLISH] Total time: ${Date.now() - startTime}ms`);
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`⚠️ [PUBLISH] Helper association failed:`, error.message);
+          }
+        });
+      }
     } catch (redisError) {
       console.error(`⚠️ Failed to store job in Redis:`, redisError);
       // Continue execution even if Redis fails
