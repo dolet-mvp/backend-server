@@ -227,95 +227,168 @@ const toggleAvailability = async (req, res) => {
       
       console.log(`✅ Helper ${helper.id} marked as available in Redis`);
       
-      // Associate helper with the nearest available task using Google Maps API
-      try {
-        const Task = require("../../models/taskModel/taskModel");
-        const axios = require("axios");
-        const allTaskKeys = await redis.keys('job:*');
-        
-        if (allTaskKeys && allTaskKeys.length > 0) {
-          const tasksPromises = allTaskKeys.map(key => redis.get(key));
-          const tasksData = await Promise.all(tasksPromises);
+      // ⚡ Run task association asynchronously (don't wait for it)
+      // This allows the API to respond immediately while association happens in background
+      setImmediate(async () => {
+        try {
+          const startTime = Date.now();
+          const Task = require("../../models/taskModel/taskModel");
+          const axios = require("axios");
           
-          const helperAddress = helper.addresses.find(addr => addr.isDefault) || helper.addresses[0];
+          console.log(`⏱️ [PERF] Starting task association for helper ${helper.id}`);
           
-          if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+          const allTaskKeys = await redis.keys('job:*');
+          console.log(`⏱️ [PERF] Found ${allTaskKeys.length} task keys in ${Date.now() - startTime}ms`);
+          
+          if (allTaskKeys && allTaskKeys.length > 0) {
+            const tasksPromises = allTaskKeys.map(key => redis.get(key));
+            const tasksData = await Promise.all(tasksPromises);
+            console.log(`⏱️ [PERF] Fetched task data in ${Date.now() - startTime}ms`);
+          
+            const helperAddress = helper.addresses.find(addr => addr.isDefault) || helper.addresses[0];
+          
+            if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+              // Step 1: Parse tasks and collect task IDs
+              const taskInfos = [];
+              
+              for (const taskData of tasksData) {
+                if (!taskData) continue;
+                
+                const task = typeof taskData === 'string' ? JSON.parse(taskData) : taskData;
+                const taskId = task.taskId || task.id;
+                const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+                
+                if (taskLocation && taskLocation.lat && taskLocation.lng) {
+                  taskInfos.push({
+                    taskId: taskId,
+                    location: taskLocation
+                  });
+                }
+              }
+            
+              console.log(`⏱️ [PERF] Parsed ${taskInfos.length} tasks with valid locations in ${Date.now() - startTime}ms`);
+              
+              // Step 2: Batch fetch all Redis data (actions + associations) in parallel
+              const redisCheckPromises = taskInfos.map(async (taskInfo) => {
+                const [actionsData, associatedHelpersData] = await Promise.all([
+                  redis.get(`task:${taskInfo.taskId}:actions`),
+                  redis.get(`task:${taskInfo.taskId}:associated_helpers`)
+                ]);
+                
+                return {
+                  taskId: taskInfo.taskId,
+                  location: taskInfo.location,
+                  actionsData,
+                  associatedHelpersData
+                };
+              });
+              
+              const redisResults = await Promise.all(redisCheckPromises);
+              console.log(`⏱️ [PERF] Batch fetched Redis data for ${redisResults.length} tasks in ${Date.now() - startTime}ms`);
+              
+              // Step 3: Filter eligible tasks (fast, no Redis calls)
+              const eligibleTasks = redisResults.filter(result => {
+              // Check if helper already acted
+              if (result.actionsData) {
+                const actions = typeof result.actionsData === 'string' ? JSON.parse(result.actionsData) : result.actionsData;
+                const hasActed = actions.some(action => action.helperId === helper.id);
+                if (hasActed) {
+                  console.log(`   ⏭️ Helper already acted on task ${result.taskId}, skipping`);
+                  return false;
+                }
+              }
+              
+              // Check if task already associated with another helper
+              if (result.associatedHelpersData) {
+                const associatedHelpers = typeof result.associatedHelpersData === 'string' 
+                  ? JSON.parse(result.associatedHelpersData) 
+                  : result.associatedHelpersData;
+                
+                if (associatedHelpers && associatedHelpers.length > 0 && !associatedHelpers.includes(helper.id)) {
+                  console.log(`   ⏭️ Task ${result.taskId} already associated with another helper, skipping`);
+                  return false;
+                }
+              }
+              
+              return true;
+            }).map(result => ({
+              taskId: result.taskId,
+              location: result.location
+            }));
+            
+            console.log(`⏱️ [PERF] Filtered to ${eligibleTasks.length} eligible tasks in ${Date.now() - startTime}ms`);
+            
+            // Step 4: Calculate distances using BATCH Google Maps API call
             const tasksWithDistance = [];
             
-            // Calculate distance for each task using Google Maps API
-            for (const taskData of tasksData) {
-              if (!taskData) continue;
+            if (eligibleTasks.length > 0) {
+              const apiKey = process.env.GOOGLE_MAPS_API_KEY;
               
-              const task = typeof taskData === 'string' ? JSON.parse(taskData) : taskData;
-              const taskId = task.taskId || task.id;
-              const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
-              
-              if (taskLocation && taskLocation.lat && taskLocation.lng) {
-                // ✅ Check if helper has already acted on this task (passed/rejected)
-                const actionsKey = `task:${taskId}:actions`;
-                const actionsData = await redis.get(actionsKey);
+              if (apiKey) {
+                console.log(`⏱️ [PERF] Starting batch Google Maps API calls in ${Date.now() - startTime}ms`);
                 
-                let hasActed = false;
-                if (actionsData) {
-                  const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
-                  hasActed = actions.some(action => action.helperId === helper.id);
+                // Google Maps allows up to 25 destinations per request
+                const batchSize = 25;
+                const batches = [];
+                
+                for (let i = 0; i < eligibleTasks.length; i += batchSize) {
+                  batches.push(eligibleTasks.slice(i, i + batchSize));
                 }
                 
-                if (hasActed) {
-                  console.log(`   ⏭️ Helper already acted on task ${taskId}, skipping`);
-                  continue;
-                }
+                console.log(`⏱️ [PERF] Split into ${batches.length} batch(es)`);
                 
-                // Check if task is already associated with another helper
-                const taskHelpersKey = `task:${taskId}:associated_helpers`;
-                const associatedHelpersData = await redis.get(taskHelpersKey);
-                
-                if (associatedHelpersData) {
-                  const associatedHelpers = typeof associatedHelpersData === 'string' 
-                    ? JSON.parse(associatedHelpersData) 
-                    : associatedHelpersData;
-                  
-                  if (associatedHelpers && associatedHelpers.length > 0 && !associatedHelpers.includes(helper.id)) {
-                    console.log(`   ⏭️ Task ${taskId} already associated with another helper, skipping`);
-                    continue;
-                  }
-                }
-                
-                // Use Google Maps Distance Matrix API
-                try {
-                  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-                  
-                  if (apiKey) {
+                // Process batches in parallel
+                const batchPromises = batches.map(async (batch, batchIndex) => {
+                  try {
+                    const batchStart = Date.now();
+                    const destinationsStr = batch.map(t => `${t.location.lat},${t.location.lng}`).join('|');
                     const url = `https://maps.googleapis.com/maps/api/distancematrix/json`;
+                    
                     const response = await axios.get(url, {
                       params: {
                         origins: `${helperAddress.latitude},${helperAddress.longitude}`,
-                        destinations: `${taskLocation.lat},${taskLocation.lng}`,
+                        destinations: destinationsStr,
                         key: apiKey,
                         units: 'metric',
                       },
+                      timeout: 5000, // 5 second timeout
                     });
                     
-                    if (response.data.status === 'OK' && 
-                        response.data.rows[0]?.elements[0]?.status === 'OK') {
-                      const distanceInMeters = response.data.rows[0].elements[0].distance.value;
-                      const distanceInKm = distanceInMeters / 1000;
+                    console.log(`⏱️ [PERF] Batch ${batchIndex + 1} completed in ${Date.now() - batchStart}ms`);
+                    
+                    if (response.data.status === 'OK' && response.data.rows[0]) {
+                      const elements = response.data.rows[0].elements;
                       
-                      if (distanceInKm <= 50) {
-                        tasksWithDistance.push({
-                          taskId: taskId,
-                          distance: distanceInKm,
-                        });
-                      }
+                      return batch.map((task, index) => {
+                        if (elements[index] && elements[index].status === 'OK') {
+                          const distanceInMeters = elements[index].distance.value;
+                          const distanceInKm = distanceInMeters / 1000;
+                          
+                          if (distanceInKm <= 50) {
+                            return {
+                              taskId: task.taskId,
+                              distance: distanceInKm,
+                            };
+                          }
+                        }
+                        return null;
+                      }).filter(Boolean);
                     }
+                    return [];
+                  } catch (error) {
+                    console.warn(`⚠️ Batch API call failed:`, error.message);
+                    return [];
                   }
-                } catch (apiError) {
-                  console.warn(`⚠️ Failed to calculate distance for task:`, apiError.message);
-                }
+                });
+                
+                const batchResults = await Promise.all(batchPromises);
+                tasksWithDistance.push(...batchResults.flat());
+                
+                console.log(`⏱️ [PERF] All batches completed, found ${tasksWithDistance.length} tasks within 50km in ${Date.now() - startTime}ms`);
               }
             }
             
-            // If found tasks within range, associate with the nearest one
+            // Step 5: Associate with nearest task
             if (tasksWithDistance.length > 0) {
               tasksWithDistance.sort((a, b) => a.distance - b.distance);
               const nearestTask = tasksWithDistance[0];
@@ -330,14 +403,17 @@ const toggleAvailability = async (req, res) => {
               await redis.setex(helperTasksKey, 43200, JSON.stringify([taskId]));
               
               console.log(`✅ Helper ${helper.id} associated with nearest task ${taskId} (${nearestTask.distance.toFixed(2)}km)`);
+              console.log(`⏱️ [PERF] TOTAL TIME: ${Date.now() - startTime}ms`);
             } else {
               console.log(`⚠️ No tasks found within 50km for helper ${helper.id} (after filtering acted tasks)`);
+              console.log(`⏱️ [PERF] TOTAL TIME: ${Date.now() - startTime}ms`);
             }
-          }
+            } // Close if (helperAddress && helperAddress.latitude && helperAddress.longitude)
+          } // Close if (allTaskKeys && allTaskKeys.length > 0)
+        } catch (associationError) {
+          console.warn(`⚠️ Failed to associate helper with tasks:`, associationError.message);
         }
-      } catch (associationError) {
-        console.warn(`⚠️ Failed to associate helper with tasks:`, associationError.message);
-      }
+      });
       
       // Broadcast helper online status
       const socketService = require("../../services/socketService");
@@ -351,87 +427,107 @@ const toggleAvailability = async (req, res) => {
         },
       });
     } else {
-      // If helper goes offline, remove from Redis and reassign their tasks
+      // If helper goes offline, remove from Redis immediately
       console.log(`\n📴 Helper ${helper.id} going offline...`);
       
       await redis.del(`helper:online:${helper.id}`);
       await redis.zrem('helpers:available', helper.id);
       
-      // Get helper's associated tasks and reassign them
-      try {
-        const helperTasksKey = `helper:${helper.id}:associated_tasks`;
-        const associatedTasksData = await redis.get(helperTasksKey);
-        
-        let taskIds = [];
-        if (associatedTasksData) {
-          if (typeof associatedTasksData === 'string') {
-            taskIds = JSON.parse(associatedTasksData);
-          } else if (Array.isArray(associatedTasksData)) {
-            taskIds = associatedTasksData;
-          }
-        }
-        
-        console.log(`   Helper has ${taskIds.length} associated task(s)`);
-        
-        // For each task, try to find a replacement helper
-        for (const taskId of taskIds) {
-          console.log(`\n   🔄 Reassigning task ${taskId}...`);
-          
-          // Get task data from Redis
-          const taskData = await redis.get(`job:${taskId}`);
-          if (!taskData) {
-            console.log(`   ⚠️ Task ${taskId} not found in Redis`);
-            continue;
-          }
-          
-          const task = typeof taskData === 'string' ? JSON.parse(taskData) : taskData;
-          const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
-          
-          if (!taskLocation || !taskLocation.lat || !taskLocation.lng) {
-            console.log(`   ⚠️ Task ${taskId} has no valid location`);
-            // Remove this helper from task association
-            await redis.del(`task:${taskId}:associated_helpers`);
-            continue;
-          }
-          
-          // Find replacement helper
-          const replacementHelperId = await findAndAssociateNearestHelper(taskId, taskLocation, helper.id);
-          
-          if (replacementHelperId) {
-            // Update task association with new helper
-            await redis.setex(`task:${taskId}:associated_helpers`, 2592000, JSON.stringify([replacementHelperId]));
-            
-            // Add task to new helper's list
-            const newHelperTasksKey = `helper:${replacementHelperId}:associated_tasks`;
-            const newHelperTasksData = await redis.get(newHelperTasksKey);
-            let newHelperTasks = [];
-            
-            if (newHelperTasksData) {
-              newHelperTasks = typeof newHelperTasksData === 'string' ? JSON.parse(newHelperTasksData) : newHelperTasksData;
-            }
-            
-            if (!newHelperTasks.includes(taskId)) {
-              newHelperTasks.push(taskId);
-              await redis.setex(newHelperTasksKey, 43200, JSON.stringify(newHelperTasks));
-            }
-            
-            console.log(`   ✅ Task ${taskId} reassigned to helper ${replacementHelperId}`);
-          } else {
-            // No replacement found, remove association
-            await redis.del(`task:${taskId}:associated_helpers`);
-            console.log(`   ⚠️ No replacement found for task ${taskId}, association removed`);
-          }
-        }
-        
-        // Clear this helper's associated tasks
-        await redis.del(helperTasksKey);
-        console.log(`✅ Helper ${helper.id} removed from all task associations`);
-        
-      } catch (cleanupError) {
-        console.error(`❌ Failed to reassign tasks:`, cleanupError.message);
-      }
-      
       console.log(`✅ Helper ${helper.id} marked as offline in Redis`);
+      
+      // ⚡ Run task reassignment asynchronously (don't wait for it)
+      // This allows the API to respond immediately while reassignment happens in background
+      setImmediate(async () => {
+        try {
+          const startTime = Date.now();
+          console.log(`⏱️ [OFFLINE-PERF] Starting task reassignment for helper ${helper.id}`);
+          
+          const helperTasksKey = `helper:${helper.id}:associated_tasks`;
+          const associatedTasksData = await redis.get(helperTasksKey);
+          
+          let taskIds = [];
+          if (associatedTasksData) {
+            if (typeof associatedTasksData === 'string') {
+              taskIds = JSON.parse(associatedTasksData);
+            } else if (Array.isArray(associatedTasksData)) {
+              taskIds = associatedTasksData;
+            }
+          }
+          
+          console.log(`⏱️ [OFFLINE-PERF] Helper has ${taskIds.length} associated task(s) - fetched in ${Date.now() - startTime}ms`);
+          
+          if (taskIds.length === 0) {
+            await redis.del(helperTasksKey);
+            console.log(`⏱️ [OFFLINE-PERF] No tasks to reassign, TOTAL TIME: ${Date.now() - startTime}ms`);
+            return;
+          }
+          
+          // Batch fetch all task data in parallel
+          const taskDataPromises = taskIds.map(taskId => redis.get(`job:${taskId}`));
+          const taskDataResults = await Promise.all(taskDataPromises);
+          console.log(`⏱️ [OFFLINE-PERF] Fetched ${taskIds.length} task data in ${Date.now() - startTime}ms`);
+          
+          // Process all task reassignments in parallel
+          const reassignmentPromises = taskIds.map(async (taskId, index) => {
+            const taskData = taskDataResults[index];
+            
+            if (!taskData) {
+              console.log(`   ⚠️ Task ${taskId} not found in Redis`);
+              return null;
+            }
+            
+            const task = typeof taskData === 'string' ? JSON.parse(taskData) : taskData;
+            const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+            
+            if (!taskLocation || !taskLocation.lat || !taskLocation.lng) {
+              console.log(`   ⚠️ Task ${taskId} has no valid location`);
+              await redis.del(`task:${taskId}:associated_helpers`);
+              return null;
+            }
+            
+            // Find replacement helper
+            const replacementHelperId = await findAndAssociateNearestHelper(taskId, taskLocation, helper.id);
+            
+            if (replacementHelperId) {
+              // Update task association with new helper
+              await redis.setex(`task:${taskId}:associated_helpers`, 2592000, JSON.stringify([replacementHelperId]));
+              
+              // Add task to new helper's list
+              const newHelperTasksKey = `helper:${replacementHelperId}:associated_tasks`;
+              const newHelperTasksData = await redis.get(newHelperTasksKey);
+              let newHelperTasks = [];
+              
+              if (newHelperTasksData) {
+                newHelperTasks = typeof newHelperTasksData === 'string' ? JSON.parse(newHelperTasksData) : newHelperTasksData;
+              }
+              
+              if (!newHelperTasks.includes(taskId)) {
+                newHelperTasks.push(taskId);
+                await redis.setex(newHelperTasksKey, 43200, JSON.stringify(newHelperTasks));
+              }
+              
+              console.log(`   ✅ Task ${taskId} reassigned to helper ${replacementHelperId}`);
+              return replacementHelperId;
+            } else {
+              // No replacement found, remove association
+              await redis.del(`task:${taskId}:associated_helpers`);
+              console.log(`   ⚠️ No replacement found for task ${taskId}, association removed`);
+              return null;
+            }
+          });
+          
+          await Promise.all(reassignmentPromises);
+          console.log(`⏱️ [OFFLINE-PERF] All reassignments completed in ${Date.now() - startTime}ms`);
+          
+          // Clear this helper's associated tasks
+          await redis.del(helperTasksKey);
+          console.log(`✅ Helper ${helper.id} removed from all task associations`);
+          console.log(`⏱️ [OFFLINE-PERF] TOTAL TIME: ${Date.now() - startTime}ms`);
+          
+        } catch (cleanupError) {
+          console.error(`❌ Failed to reassign tasks:`, cleanupError.message);
+        }
+      });
       
       // Broadcast helper offline status
       const socketService = require("../../services/socketService");

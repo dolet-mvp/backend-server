@@ -63,6 +63,8 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Import block check middleware
+const { checkUserBlocked } = require("./middleware/blockCheckMiddleware");
 
 const authRoutes = require("./routes/authRoute/authRoute");
 const profileRoutes = require("./routes/profileRoute/profileRoute");
@@ -80,10 +82,14 @@ const supportRoutes = require("./routes/supportRoute/supportRoute");
 const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
 const geminiRoutes = require("./routes/aiRoute/gemniRoute");
 const reportRoutes = require("./routes/reportRoute/reportRoute");
+const blockRoutes = require("./routes/blockRoute/blockRoute");
 
 
 
 app.use("/api/auth", authRoutes);
+
+// This runs AFTER authentication routes but BEFORE all protected routes
+app.use(checkUserBlocked);
 
 
 app.use("/api/ai", geminiRoutes);
@@ -164,6 +170,12 @@ app.use(
 app.use(
   "/api/messages",
   taskMessageRoutes
+);
+
+// Block management routes (Admin only)
+app.use(
+  "/api/admin/blocks",
+  blockRoutes
 );
 
 
