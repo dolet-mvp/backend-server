@@ -1,12 +1,11 @@
-# 🏗️ Complete Architecture & Flow Diagram
+#  Complete Architecture & Flow Diagram
 
 ## System Overview: Task Routes, Tracking Routes, Helper Routes Integration
-
 This document provides a comprehensive view of how **taskRoute**, **trackingRoute**, and **helperRoute** work together with Redis, PostgreSQL, and Socket.io to create a real-time task management system.
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 1. [System Architecture Overview](#system-architecture-overview)
 2. [Route Structure & Endpoints](#route-structure--endpoints)
 3. [Redis Data Structures](#redis-data-structures)
@@ -16,7 +15,7 @@ This document provides a comprehensive view of how **taskRoute**, **trackingRout
 
 ---
 
-## 🎯 System Architecture Overview
+##  System Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐

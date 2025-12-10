@@ -250,6 +250,101 @@ const initSocketServer = (server) => {
       console.log(`📍 [SOCKET SERVER] User ${userId} left task tracking room: ${roomName}`);
     });
 
+    // Handle joining job search (real-time available tasks for helpers)
+    socket.on("joinJobSearch", async () => {
+      try {
+        if (userType !== "helper") {
+          socket.emit("jobSearchError", { message: "Only helpers can search for jobs" });
+          return;
+        }
+
+        // Get helper's data from Redis (includes location)
+        const redis = require("../config/redis/redis");
+        const cachedHelper = await redis.get(`helper:online:${userId}`);
+        
+        if (!cachedHelper) {
+          socket.emit("jobSearchError", { 
+            message: "You must be online to search for jobs",
+            requiresAction: "Go online first"
+          });
+          return;
+        }
+
+        const helperData = typeof cachedHelper === 'string' ? JSON.parse(cachedHelper) : cachedHelper;
+        
+        // Get helper's address
+        let helperLat, helperLng;
+        if (helperData.addresses && helperData.addresses.length > 0) {
+          const helperAddress = helperData.addresses.find(addr => addr.isDefault) || helperData.addresses[0];
+          if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+            helperLat = parseFloat(helperAddress.latitude);
+            helperLng = parseFloat(helperAddress.longitude);
+          }
+        }
+
+        if (!helperLat || !helperLng) {
+          socket.emit("jobSearchError", { 
+            message: "Please add your address with location coordinates to search for jobs"
+          });
+          return;
+        }
+
+        // Store helper's location on socket for filtering new jobs
+        socket.jobSearchData = {
+          helperId: userId,
+          latitude: helperLat,
+          longitude: helperLng,
+          radius: 50, // Default search radius in km
+        };
+
+        const roomName = `job:search:${userId}`;
+        socket.join(roomName);
+        
+        console.log(`🔍 [SOCKET] Helper ${userId} joined job search - Location: ${helperLat}, ${helperLng}`);
+        
+        socket.emit("joinedJobSearch", { 
+          message: "Connected to real-time job updates",
+          location: { lat: helperLat, lng: helperLng }
+        });
+
+        // Send initial available tasks (reuse getAvailableTasks logic)
+        const helperTaskController = require("../controllers/taskController/helperTaskController");
+        const mockReq = { user: { id: userId, userType: 'helper' } };
+        const mockRes = {
+          status: (code) => ({
+            json: (data) => {
+              if (data.success && data.data) {
+                socket.emit("availableJobs", {
+                  jobs: data.data,
+                  count: data.data.length,
+                  message: data.data.length > 0 ? `Found ${data.data.length} jobs nearby` : "No jobs available right now"
+                });
+                console.log(`📤 [SOCKET] Sent ${data.data.length} initial jobs to helper ${userId}`);
+              }
+            }
+          })
+        };
+
+        // Call getAvailableTasks to get initial jobs
+        await helperTaskController.getAvailableTasks(mockReq, mockRes);
+
+      } catch (error) {
+        console.error("❌ [SOCKET] Error joining job search:", error);
+        socket.emit("jobSearchError", { message: error.message });
+      }
+    });
+
+    // Handle leaving job search
+    socket.on("leaveJobSearch", () => {
+      if (userType === "helper") {
+        const roomName = `job:search:${userId}`;
+        socket.leave(roomName);
+        delete socket.jobSearchData;
+        console.log(`🚪 [SOCKET] Helper ${userId} left job search`);
+        socket.emit("leftJobSearch", { message: "Disconnected from job updates" });
+      }
+    });
+
     // Handle sending chat message
     socket.on("sendTaskMessage", async (data) => {
       try {
@@ -533,6 +628,108 @@ const broadcastToUserType = (userType, event, data) => {
   }
 };
 
+/**
+ * Broadcast new job to helpers searching for jobs (based on location and associated tasks)
+ * @param {object} taskData - New task data from Redis
+ */
+const broadcastNewJobToSearchingHelpers = async (taskData) => {
+  try {
+    const io = getIO();
+    const redis = require("../config/redis/redis");
+    const { calculateDistance, getGoogleMapsDistances } = require("../controllers/taskController/helperTaskController");
+    
+    // Get task location
+    const taskLocation = taskData.location || (taskData.steps && taskData.steps[0] ? taskData.steps[0].location : null);
+    
+    if (!taskLocation || !taskLocation.lat || !taskLocation.lng) {
+      console.log(`⚠️ [SOCKET BROADCAST] Task ${taskData.taskId} has no location, skipping broadcast`);
+      return;
+    }
+
+    const taskLat = parseFloat(taskLocation.lat);
+    const taskLng = parseFloat(taskLocation.lng);
+    let broadcastCount = 0;
+
+    // Get all connected sockets
+    const sockets = io.sockets.sockets;
+    
+    for (const [socketId, socket] of sockets) {
+      // Only process helpers in job search
+      if (socket.jobSearchData) {
+        const { helperId, latitude, longitude, radius } = socket.jobSearchData;
+
+        try {
+          // Check if helper is in associated tasks list
+          const helperTasksKey = `helper:${helperId}:associated_tasks`;
+          const associatedTasksData = await redis.get(helperTasksKey);
+          
+          let associatedTaskIds = [];
+          if (associatedTasksData) {
+            associatedTaskIds = typeof associatedTasksData === 'string' 
+              ? JSON.parse(associatedTasksData) 
+              : associatedTasksData;
+          }
+
+          const taskId = taskData.taskId || taskData.id;
+          
+          // Only send if task is in helper's associated list
+          if (associatedTaskIds.includes(taskId)) {
+            // Calculate distance
+            const distance = calculateDistance(latitude, longitude, taskLat, taskLng);
+
+            if (distance <= radius) {
+              // Get Google Maps distance for accurate info
+              let distanceInfo = {
+                distance: parseFloat(distance.toFixed(2)),
+                distanceText: `${distance.toFixed(1)} km`,
+                durationText: 'N/A',
+                source: 'haversine'
+              };
+
+              try {
+                const googleDistances = await getGoogleMapsDistances(
+                  { lat: latitude, lng: longitude },
+                  [{ lat: taskLat, lng: taskLng }]
+                );
+
+                if (googleDistances && googleDistances[0] && googleDistances[0].status === 'OK') {
+                  const gDistance = googleDistances[0].distance;
+                  const gDuration = googleDistances[0].duration;
+                  
+                  distanceInfo = {
+                    distance: parseFloat(gDistance.toFixed(2)),
+                    distanceText: gDistance < 1 ? `${Math.round(gDistance * 1000)} m` : `${gDistance.toFixed(1)} km`,
+                    durationText: gDuration < 60 ? `${Math.round(gDuration)} mins` : `${Math.floor(gDuration / 60)} hr ${Math.round(gDuration % 60)} mins`,
+                    duration: gDuration * 60,
+                    source: 'google_maps'
+                  };
+                }
+              } catch (error) {
+                console.warn(`⚠️ [SOCKET BROADCAST] Google Maps failed for helper ${helperId}, using haversine`);
+              }
+
+              // Send new job to this helper
+              socket.emit("newJobAvailable", {
+                ...taskData,
+                ...distanceInfo
+              });
+
+              broadcastCount++;
+              console.log(`📤 [SOCKET BROADCAST] Sent new job ${taskId} to helper ${helperId} (${distanceInfo.distanceText} away)`);
+            }
+          }
+        } catch (error) {
+          console.error(`❌ [SOCKET BROADCAST] Error processing helper ${helperId}:`, error.message);
+        }
+      }
+    }
+
+    console.log(`✅ [SOCKET BROADCAST] Broadcasted job ${taskData.taskId} to ${broadcastCount} helpers`);
+  } catch (error) {
+    console.error("❌ [SOCKET BROADCAST] Error broadcasting new job:", error);
+  }
+};
+
 module.exports = {
   initSocketServer,
   getIO,
@@ -542,4 +739,5 @@ module.exports = {
   broadcastToUserType,
   broadcastNearbyHelpersUpdate,
   broadcastHelperStatusChange,
+  broadcastNewJobToSearchingHelpers,
 };

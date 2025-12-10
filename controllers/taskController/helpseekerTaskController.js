@@ -6,6 +6,7 @@ const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Address = require("../../models/addressModel/addressModel");
 const axios = require("axios");
 const jobMatchingService = require("../../services/jobMatchingService");
+const socketService = require("../../services/socketService");
 const redis = require("../../config/redis/redis");
 const { createNotification } = require("../../services/notificationService");
 
@@ -163,566 +164,12 @@ const createTask = async (req, res) => {
   }
 };
 
-// Helper function to calculate distance using Google Maps Distance Matrix API
-const calculateDistanceWithGoogle = async (origin, destination) => {
-  try {
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-    
-    if (!apiKey) {
-      console.error("❌ Google Maps API key not found in environment");
-      return null;
-    }
-
-    const url = `https://maps.googleapis.com/maps/api/distancematrix/json`;
-    console.log(`      🌐 API Request: ${url}`);
-    console.log(`      📍 Origin: ${origin.lat},${origin.lng}`);
-    console.log(`      📍 Destination: ${destination.lat},${destination.lng}`);
-    
-    const response = await axios.get(url, {
-      params: {
-        origins: `${origin.lat},${origin.lng}`,
-        destinations: `${destination.lat},${destination.lng}`,
-        key: apiKey,
-        units: 'metric',
-      },
-    });
-
-    console.log(`      📡 API Response Status: ${response.data.status}`);
-    
-    if (response.data.status !== 'OK') {
-      console.error(`      ❌ API returned status: ${response.data.status}`);
-      if (response.data.error_message) {
-        console.error(`      ❌ Error message: ${response.data.error_message}`);
-      }
-      console.error(`      📄 Full response:`, JSON.stringify(response.data));
-      return null;
-    }
-    
-    const element = response.data.rows[0]?.elements[0];
-    if (!element) {
-      console.error(`      ❌ No route elements in response`);
-      return null;
-    }
-    
-    console.log(`      📡 Element Status: ${element.status}`);
-    
-    if (element.status !== 'OK') {
-      console.error(`      ❌ Element status: ${element.status}`);
-      return null;
-    }
-    
-    const distanceInMeters = element.distance.value;
-    const distanceInKm = distanceInMeters / 1000;
-    const durationInSeconds = element.duration.value;
-    
-    return {
-      distance: distanceInKm,
-      duration: durationInSeconds,
-      distanceText: element.distance.text,
-      durationText: element.duration.text,
-    };
-  } catch (error) {
-    console.error(`      ❌ Google Distance Matrix API error: ${error.message}`);
-    if (error.response) {
-      console.error(`      📡 Response status: ${error.response.status}`);
-      console.error(`      📄 Response data:`, JSON.stringify(error.response.data));
-    }
-    console.error(`      📚 Stack:`, error.stack);
-    return null;
-  }
-};
-
-// Check if helper has already rejected or passed a task
-const hasHelperActedOnTask = async (taskId, helperId) => {
-  const key = `task:${taskId}:actions`;
-  const actionsData = await redis.get(key);
-  
-  if (!actionsData) return { hasActed: false, taskId, helperId };
-
-  const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
-  const actionFound = actions.find(action => action.helperId === helperId);
-  
-  return {
-    hasActed: !!actionFound,
-    taskId,
-    helperId,
-    action: actionFound?.action || null,
-    timestamp: actionFound?.timestamp || null,
-    reason: actionFound?.reason || null
-  };
-};
-
-// Helper function to find the nearest available helper and associate with task
-const associateHelpersWithTask = async (taskId, taskLocation, searchRadius = 50) => {
-  try {
-    // Enforce maximum radius of 100km to prevent unreasonable associations
-    const maxRadius = 100;
-    const effectiveRadius = Math.min(searchRadius, maxRadius);
-    
-    if (searchRadius > maxRadius) {
-      console.log(`⚠️ Search radius ${searchRadius}km exceeds maximum ${maxRadius}km, using ${effectiveRadius}km`);
-    }
-    
-    console.log('\n========================================');
-    console.log('🔗 STARTING HELPER ASSOCIATION');
-    console.log('========================================');
-    console.log(`📍 Task ID: ${taskId}`);
-    console.log(`📍 Task Location: lat=${taskLocation.lat}, lng=${taskLocation.lng}`);
-    console.log(`📍 Search Radius: ${effectiveRadius}km (requested: ${searchRadius}km, max: ${maxRadius}km)`);
-    console.log('----------------------------------------');
-    
-    // Get all online helpers from Redis
-    console.log('🔍 Step 1: Searching for online helpers in Redis...');
-    const onlineHelperKeys = await redis.keys('helper:online:*');
-    console.log(`   Found ${onlineHelperKeys ? onlineHelperKeys.length : 0} helper key(s)`);
-    
-    if (!onlineHelperKeys || onlineHelperKeys.length === 0) {
-      console.log('❌ RESULT: No online helpers found in Redis');
-      console.log('========================================\n');
-      return [];
-    }
-    
-    console.log('🔍 Step 2: Fetching helper data from Redis...');
-    const helperPromises = onlineHelperKeys.map(key => redis.get(key));
-    const helpersData = await Promise.all(helperPromises);
-    
-    const helpers = helpersData
-      .filter(data => data !== null)
-      .map(data => typeof data === 'string' ? JSON.parse(data) : data);
-    
-    console.log(`   Retrieved ${helpers.length} helper profile(s)`);
-    
-    // Prepare helper locations for batch API call
-    const helperLocations = [];
-    const validHelpers = [];
-    
-    for (let i = 0; i < helpers.length; i++) {
-      const helper = helpers[i];
-      console.log(`\n   📌 Helper ${i + 1}/${helpers.length}: ${helper.id}`);
-      console.log(`      Name: ${helper.fullName || 'N/A'}`);
-      
-      const address = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
-      
-      if (!address || !address.latitude || !address.longitude) {
-        console.log(`      ⚠️ No valid address - SKIPPED`);
-        continue;
-      }
-      
-      console.log(`      Location: lat=${address.latitude}, lng=${address.longitude}`);
-      helperLocations.push({ lat: parseFloat(address.latitude), lng: parseFloat(address.longitude) });
-      validHelpers.push(helper);
-    }
-    
-    if (validHelpers.length === 0) {
-      console.log('\n❌ RESULT: No helpers with valid addresses');
-      console.log('========================================\n');
-      return [];
-    }
-    
-    // Filter out helpers who have already acted on this task (rejected/passed)
-    console.log('\n🔍 Step 3: Filtering out helpers who already acted on this task...');
-    const availableHelpers = [];
-    const availableHelperLocations = [];
-    
-    for (let i = 0; i < validHelpers.length; i++) {
-      const helper = validHelpers[i];
-      const actionResult = await hasHelperActedOnTask(taskId, helper.id);
-      
-      if (actionResult.hasActed) {
-        console.log(`   ⏭️ Helper ${helper.fullName || helper.id} already acted on task ${taskId} (${actionResult.action}) - SKIPPED`);
-        continue;
-      }
-      
-      availableHelpers.push(helper);
-      availableHelperLocations.push(helperLocations[i]);
-    }
-    
-    if (availableHelpers.length === 0) {
-      console.log('\n❌ RESULT: No available helpers (all have already acted on this task)');
-      console.log('========================================\n');
-      return [];
-    }
-    
-    console.log(`   ✅ ${availableHelpers.length} helper(s) available after filtering`);
-    
-    // Calculate distances using Google Maps API (batch call)
-    console.log('\n🔍 Step 4: Calculating distances using Google Maps API...');
-    console.log(`   Batch request for ${availableHelpers.length} helper(s)`);
-    
-    const googleDistances = await getGoogleMapsDistances(
-      { lat: taskLocation.lat, lng: taskLocation.lng },
-      availableHelperLocations
-    );
-    
-    if (!googleDistances) {
-      console.log('   ❌ Google Maps API call failed - falling back to Haversine');
-    } else {
-      console.log(`   ✓ Received ${googleDistances.length} distance result(s)`);
-    }
-    
-    const helpersWithDistance = [];
-    
-    for (let i = 0; i < availableHelpers.length; i++) {
-      const helper = availableHelpers[i];
-      const address = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
-      
-      let distance, duration;
-      
-      if (googleDistances && googleDistances[i] && googleDistances[i].status === 'OK') {
-        distance = googleDistances[i].distance;
-        duration = googleDistances[i].duration;
-        
-        const distanceText = distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`;
-        const durationText = duration < 60 ? `${Math.round(duration)} mins` : `${Math.floor(duration / 60)} hr ${Math.round(duration % 60)} mins`;
-        
-        console.log(`\n   ✓ Helper: ${helper.fullName || helper.id}`);
-        console.log(`      🚗 Road Distance: ${distanceText}`);
-        console.log(`      ⏱️  Travel Time: ${durationText}`);
-        
-        if (distance <= effectiveRadius) {
-          console.log(`      ✓ Within ${effectiveRadius}km radius - INCLUDED`);
-          helpersWithDistance.push({
-            helperId: helper.id,
-            helperName: helper.fullName,
-            distance: distance,
-            duration: duration * 60, // Convert minutes to seconds
-            distanceText: distanceText,
-            durationText: durationText,
-          });
-        } else {
-          console.log(`      ✗ Beyond ${effectiveRadius}km radius - EXCLUDED`);
-        }
-      } else {
-        // Fallback to Haversine
-        distance = calculateDistance(taskLocation.lat, taskLocation.lng, address.latitude, address.longitude);
-        console.log(`\n   ⚠️ Helper: ${helper.fullName || helper.id}`);
-        console.log(`      📏 Straight-line Distance: ${distance.toFixed(2)} km (Haversine fallback)`);
-        
-        if (distance <= effectiveRadius) {
-          console.log(`      ✓ Within ${effectiveRadius}km radius - INCLUDED`);
-          helpersWithDistance.push({
-            helperId: helper.id,
-            helperName: helper.fullName,
-            distance: distance,
-            duration: null,
-            distanceText: `${distance.toFixed(1)} km`,
-            durationText: 'N/A',
-          });
-        } else {
-          console.log(`      ✗ Beyond ${effectiveRadius}km radius - EXCLUDED`);
-        }
-      }
-    }
-    
-    console.log('\n----------------------------------------');
-    console.log('🔍 Step 5: Selecting nearest helper...');
-    
-    if (helpersWithDistance.length === 0) {
-      console.log(`❌ RESULT: No helpers found within ${effectiveRadius}km for task ${taskId}`);
-      console.log('========================================\n');
-      return [];
-    }
-    
-    console.log(`   Found ${helpersWithDistance.length} helper(s) within radius`);
-    
-    // Sort by distance and take only the nearest helper
-    helpersWithDistance.sort((a, b) => a.distance - b.distance);
-    const nearestHelper = helpersWithDistance[0];
-    
-    console.log(`   🎯 NEAREST HELPER SELECTED:`);
-    console.log(`      ID: ${nearestHelper.helperId}`);
-    console.log(`      Name: ${nearestHelper.helperName || 'N/A'}`);
-    console.log(`      Distance: ${nearestHelper.distanceText}`);
-    console.log(`      ETA: ${nearestHelper.durationText}`);
-    
-    // Store association in Redis (only 1 helper)
-    console.log('\n🔍 Step 6: Creating bidirectional associations in Redis...');
-    const associationKey = `task:${taskId}:associated_helpers`;
-    const helperIds = [nearestHelper.helperId];
-    
-    console.log(`   Setting key: ${associationKey}`);
-    await redis.setex(associationKey, 2592000, JSON.stringify(helperIds)); // 30 days
-    console.log(`   ✓ Stored helper [${nearestHelper.helperId}] for task [${taskId}]`);
-    
-    // Create reverse mapping (helper -> tasks)
-    const helperTasksKey = `helper:${nearestHelper.helperId}:associated_tasks`;
-    const existingTasksData = await redis.get(helperTasksKey);
-    
-    // Handle both string and object responses from Upstash Redis
-    let tasksList = [];
-    if (existingTasksData) {
-      if (typeof existingTasksData === 'string') {
-        try {
-          tasksList = JSON.parse(existingTasksData);
-        } catch (parseError) {
-          console.error(`   ⚠️ Failed to parse existing tasks, starting fresh:`, parseError.message);
-          tasksList = [];
-        }
-      } else if (Array.isArray(existingTasksData)) {
-        tasksList = existingTasksData;
-      } else {
-        console.error(`   ⚠️ Unexpected data type, starting fresh`);
-        tasksList = [];
-      }
-    }
-    
-    console.log(`   Current tasks for helper: ${tasksList.length}`);
-    
-    if (!tasksList.includes(taskId)) {
-      tasksList.push(taskId);
-      console.log(`   Setting key: ${helperTasksKey}`);
-      await redis.setex(helperTasksKey, 43200, JSON.stringify(tasksList)); // 12 hours
-      console.log(`   ✓ Added task [${taskId}] to helper's task list`);
-    } else {
-      console.log(`   ℹ️ Task already in helper's list`);
-    }
-    
-    console.log('\n✅ ASSOCIATION SUCCESSFUL!');
-    console.log('========================================\n');
-    
-    return [{
-      helperId: nearestHelper.helperId,
-      helperName: nearestHelper.helperName,
-      distance: nearestHelper.distance,
-      distanceText: nearestHelper.distanceText,
-      duration: nearestHelper.duration,
-      durationText: nearestHelper.durationText,
-    }];
-  } catch (error) {
-    console.error('\n❌ ERROR IN ASSOCIATION PROCESS:');
-    console.error('   Error:', error.message);
-    console.error('   Stack:', error.stack);
-    console.log('========================================\n');
-    return [];
-  }
-};
-
-// Helper function to find and associate available tasks with a specific helper
-const associateTasksWithHelper = async (helperId, helperLocation, searchRadius = 50, excludeTaskIds = []) => {
-  try {
-    // Enforce maximum radius of 100km to prevent unreasonable associations
-    const maxRadius = 100;
-    const effectiveRadius = Math.min(searchRadius, maxRadius);
-    
-    if (searchRadius > maxRadius) {
-      console.log(`⚠️ Search radius ${searchRadius}km exceeds maximum ${maxRadius}km, using ${effectiveRadius}km`);
-    }
-    
-    console.log('\n========================================');
-    console.log('🔗 FINDING AVAILABLE TASKS FOR HELPER');
-    console.log('========================================');
-    console.log(`👤 Helper ID: ${helperId}`);
-    console.log(`📍 Helper Location: lat=${helperLocation.lat}, lng=${helperLocation.lng}`);
-    console.log(`📍 Search Radius: ${effectiveRadius}km (requested: ${searchRadius}km, max: ${maxRadius}km)`);
-    console.log(`🚫 Excluded Tasks: ${excludeTaskIds.join(', ') || 'None'}`);
-    console.log('----------------------------------------');
-    
-    // Get all published tasks from Redis
-    console.log('🔍 Step 1: Fetching published tasks from Redis...');
-    const taskKeys = await redis.keys('job:*');
-    
-    if (!taskKeys || taskKeys.length === 0) {
-      console.log('❌ RESULT: No tasks found in Redis');
-      console.log('========================================\n');
-      return [];
-    }
-    
-    console.log(`   Found ${taskKeys.length} task key(s)`);
-    
-    const taskPromises = taskKeys.map(key => redis.get(key));
-    const tasksData = await Promise.all(taskPromises);
-    
-    const tasks = tasksData
-      .filter(data => data !== null)
-      .map(data => typeof data === 'string' ? JSON.parse(data) : data)
-      .filter(task => task.status === 'in_queue');
-    
-    console.log(`   Retrieved ${tasks.length} task(s) with status 'in_queue'`);
-    
-    if (tasks.length === 0) {
-      console.log('❌ RESULT: No tasks in queue');
-      console.log('========================================\n');
-      return [];
-    }
-    
-    // Filter tasks with valid locations
-    console.log('\n🔍 Step 2: Filtering tasks with valid locations...');
-    const validTasks = [];
-    const taskLocations = [];
-    
-    for (const task of tasks) {
-      const taskId = task.taskId || task.id;
-      
-      // Skip excluded tasks
-      if (excludeTaskIds.includes(taskId)) {
-        console.log(`   ⏭️ Task ${taskId} excluded, skipping`);
-        continue;
-      }
-      
-      const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
-      
-      if (!taskLocation || !taskLocation.lat || !taskLocation.lng) {
-        console.log(`   ⚠️ Task ${taskId} has no valid location, skipping`);
-        continue;
-      }
-      
-      // Check if task is already associated with a helper
-      const associatedHelpersKey = `task:${taskId}:associated_helpers`;
-      const associatedHelpersData = await redis.get(associatedHelpersKey);
-      
-      if (associatedHelpersData) {
-        const associatedHelpers = typeof associatedHelpersData === 'string' 
-          ? JSON.parse(associatedHelpersData) 
-          : associatedHelpersData;
-        
-        if (associatedHelpers && associatedHelpers.length > 0) {
-          console.log(`   ⏭️ Task ${taskId} already associated with helper(s), skipping`);
-          continue;
-        }
-      }
-      
-      // Check if this helper has already acted on this task
-      const actionResult = await hasHelperActedOnTask(taskId, helperId);
-      
-      if (actionResult.hasActed) {
-        console.log(`   ⏭️ Helper already acted on task ${taskId} (${actionResult.action}), skipping`);
-        continue;
-      }
-      
-      validTasks.push(task);
-      taskLocations.push({ 
-        lat: parseFloat(taskLocation.lat), 
-        lng: parseFloat(taskLocation.lng) 
-      });
-    }
-    
-    if (validTasks.length === 0) {
-      console.log('\n❌ RESULT: No valid unassigned tasks available');
-      console.log('========================================\n');
-      return [];
-    }
-    
-    console.log(`   ✅ ${validTasks.length} valid task(s) available for association`);
-    
-    // Calculate distances using Google Maps API
-    console.log('\n🔍 Step 3: Calculating distances...');
-    const googleDistances = await getGoogleMapsDistances(
-      { lat: helperLocation.lat, lng: helperLocation.lng },
-      taskLocations
-    );
-    
-    const tasksWithDistance = [];
-    
-    for (let i = 0; i < validTasks.length; i++) {
-      const task = validTasks[i];
-      const taskId = task.taskId || task.id;
-      let distance, duration;
-      
-      if (googleDistances && googleDistances[i] && googleDistances[i].status === 'OK') {
-        distance = googleDistances[i].distance;
-        duration = googleDistances[i].duration;
-        
-        console.log(`   ✓ Task ${taskId}: ${distance.toFixed(2)}km (${Math.round(duration)} mins)`);
-        
-        if (distance <= effectiveRadius) {
-          tasksWithDistance.push({
-            taskId: taskId,
-            task: task,
-            distance: distance,
-            duration: duration * 60,
-            distanceText: distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`,
-            durationText: duration < 60 ? `${Math.round(duration)} mins` : `${Math.floor(duration / 60)} hr ${Math.round(duration % 60)} mins`,
-          });
-        }
-      } else {
-        // Fallback to Haversine
-        const taskLocation = taskLocations[i];
-        distance = calculateDistance(helperLocation.lat, helperLocation.lng, taskLocation.lat, taskLocation.lng);
-        
-        console.log(`   ✓ Task ${taskId}: ${distance.toFixed(2)}km (straight-line)`);
-        
-        if (distance <= effectiveRadius) {
-          tasksWithDistance.push({
-            taskId: taskId,
-            task: task,
-            distance: distance,
-            duration: null,
-            distanceText: `${distance.toFixed(1)} km`,
-            durationText: 'N/A',
-          });
-        }
-      }
-    }
-    
-    if (tasksWithDistance.length === 0) {
-      console.log(`\n❌ RESULT: No tasks within ${effectiveRadius}km radius`);
-      console.log('========================================\n');
-      return [];
-    }
-    
-    // Sort by distance and pick the nearest one
-    tasksWithDistance.sort((a, b) => a.distance - b.distance);
-    const nearestTask = tasksWithDistance[0];
-    
-    console.log('\n🔍 Step 4: Associating nearest task with helper...');
-    console.log(`   🎯 NEAREST TASK: ${nearestTask.taskId}`);
-    console.log(`      Distance: ${nearestTask.distanceText}`);
-    console.log(`      ETA: ${nearestTask.durationText}`);
-    
-    // Associate task with helper
-    const taskHelpersKey = `task:${nearestTask.taskId}:associated_helpers`;
-    await redis.setex(taskHelpersKey, 2592000, JSON.stringify([helperId]));
-    console.log(`   ✓ Added helper ${helperId} to task ${nearestTask.taskId}`);
-    
-    // Add task to helper's list
-    const helperTasksKey = `helper:${helperId}:associated_tasks`;
-    const helperTasksData = await redis.get(helperTasksKey);
-    
-    let tasksList = [];
-    if (helperTasksData) {
-      tasksList = typeof helperTasksData === 'string' ? JSON.parse(helperTasksData) : helperTasksData;
-    }
-    
-    if (!tasksList.includes(nearestTask.taskId)) {
-      tasksList.push(nearestTask.taskId);
-      await redis.setex(helperTasksKey, 43200, JSON.stringify(tasksList));
-      console.log(`   ✓ Added task ${nearestTask.taskId} to helper's list`);
-    }
-    
-    console.log('\n✅ ASSOCIATION SUCCESSFUL!');
-    console.log('========================================\n');
-    
-    return [{
-      taskId: nearestTask.taskId,
-      distance: nearestTask.distance,
-      distanceText: nearestTask.distanceText,
-      duration: nearestTask.duration,
-      durationText: nearestTask.durationText,
-    }];
-  } catch (error) {
-    console.error('\n❌ ERROR IN TASK ASSOCIATION:');
-    console.error('   Error:', error.message);
-    console.error('   Stack:', error.stack);
-    console.log('========================================\n');
-    return [];
-  }
-};
-
 const publishTask = async (req, res) => {
   try {
     const { taskId } = req.params;
     const helpseekerId = req.user.id;
 
-    const task = await Task.findOne({ 
-      where: { id: taskId, helpseekerId },
-      include: [
-        {
-          model: Helpseeker,
-          as: "creator",
-          attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
-        },
-      ],
-    });
+    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
 
     if (!task) {
       return res.status(404).json({
@@ -755,13 +202,6 @@ const publishTask = async (req, res) => {
       const jobData = {
         taskId: task.id,
         helpseekerId: helpseekerId,
-        creator: {
-          id: task.creator.id,
-          fullName: task.creator.fullName,
-          email: task.creator.email,
-          phone: task.creator.phone,
-          profilePhoto: task.creator.profilePhoto,
-        },
         title: task.title,
         description: task.description,
         category: task.category,
@@ -785,49 +225,13 @@ const publishTask = async (req, res) => {
       });
       
       console.log(`✅ Job ${task.id} stored in Redis successfully`);
-      
-      // Associate nearest available helper with this task
-      console.log(`\n🔄 Checking if task has location for helper association...`);
-      const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
-      
-      if (!taskLocation) {
-        console.log(`⚠️ Task ${task.id} has NO location data`);
-        console.log(`   task.location: ${task.location}`);
-        console.log(`   task.steps: ${task.steps ? 'exists' : 'null'}`);
-        if (task.steps && task.steps.length > 0) {
-          console.log(`   steps[0]: ${JSON.stringify(task.steps[0])}`);
-        }
-      } else if (!taskLocation.lat || !taskLocation.lng) {
-        console.log(`⚠️ Task ${task.id} location missing lat/lng`);
-        console.log(`   Location data:`, taskLocation);
-      } else {
-        console.log(`✓ Task ${task.id} has valid location`);
-        console.log(`   Using location: lat=${taskLocation.lat}, lng=${taskLocation.lng}`);
-        console.log(`   Address: ${taskLocation.address || 'N/A'}`);
-        
-        const associatedHelpers = await associateHelpersWithTask(task.id, taskLocation);
-        
-        if (associatedHelpers.length > 0) {
-          console.log(`\n✅ FINAL RESULT: Task associated with ${associatedHelpers.length} helper`);
-          console.log(`   Helper: ${associatedHelpers[0].helperName || associatedHelpers[0].helperId}`);
-          console.log(`   Distance: ${associatedHelpers[0].distanceText}`);
-          console.log(`   ETA: ${associatedHelpers[0].durationText}`);
-          
-          // Update Redis job data with distance information
-          jobData.distanceFromHelper = {
-            helperId: associatedHelpers[0].helperId,
-            helperName: associatedHelpers[0].helperName,
-            distance: associatedHelpers[0].distance,
-            distanceText: associatedHelpers[0].distanceText,
-            duration: associatedHelpers[0].duration,
-            durationText: associatedHelpers[0].durationText,
-          };
-          
-          await redis.setex(`job:${task.id}`, 2592000, JSON.stringify(jobData));
-          console.log(`   ✅ Updated Redis with distance information`);
-        } else {
-          console.log(`\n⚠️ FINAL RESULT: No helpers associated with task ${task.id}`);
-        }
+
+      // Broadcast new job to all helpers searching for jobs via socket
+      try {
+        await socketService.broadcastNewJobToSearchingHelpers(jobData);
+      } catch (socketError) {
+        console.error(`⚠️ Failed to broadcast job via socket:`, socketError.message);
+        // Continue execution even if socket broadcast fails
       }
     } catch (redisError) {
       console.error(`⚠️ Failed to store job in Redis:`, redisError);
@@ -1160,10 +564,6 @@ const getGoogleMapsDistances = async (origin, destinations) => {
 
     if (response.data.status !== "OK") {
       console.warn(`⚠️ Google Maps API returned status: ${response.data.status}`);
-      if (response.data.error_message) {
-        console.warn(`⚠️ Error message: ${response.data.error_message}`);
-      }
-      console.warn(`⚠️ Full response:`, JSON.stringify(response.data));
       return null;
     }
 
@@ -1185,6 +585,7 @@ const getGoogleMapsDistances = async (origin, destinations) => {
 const getNearbyHelpers = async (req, res) => {
   try {
     const helpseekerId = req.user.id;
+    const radius = process.env.TASK_SEARCH_RADIUS;
 
     console.log("🔍 Searching for online helpers near helpseeker:", helpseekerId);
 
@@ -1215,15 +616,7 @@ const getNearbyHelpers = async (req, res) => {
 
     const lat = parseFloat(userAddress.latitude);
     const lng = parseFloat(userAddress.longitude);
-    
-    // Enforce maximum radius of 100km to prevent unreasonable search radius
-    const envRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
-    const maxRadius = 100;
-    const searchRadius = Math.min(envRadius, maxRadius);
-    
-    if (envRadius > maxRadius) {
-      console.log(`⚠️ Search radius ${envRadius}km exceeds maximum ${maxRadius}km, using ${searchRadius}km`);
-    }
+    const searchRadius = parseFloat(radius);
 
     console.log("📍 User location:", {
       latitude: lat,
@@ -1620,73 +1013,6 @@ const cancelTask = async (req, res) => {
     // Remove from queue if exists
     await TaskQueue.destroy({ where: { taskId: task.id } });
 
-    // Remove from Redis cache when cancelled
-    try {
-      console.log(`\n🗑️ Cleaning up cancelled task ${task.id} from Redis...`);
-      
-      // Remove published task
-      await redis.del(`job:${task.id}`);
-      await redis.zrem('jobs:published', `job:${task.id}`);
-      
-      // Remove task's associated helpers
-      const taskHelpersKey = `task:${task.id}:associated_helpers`;
-      const taskHelpersData = await redis.get(taskHelpersKey);
-      
-      if (taskHelpersData) {
-        let helperIds = [];
-        if (typeof taskHelpersData === 'string') {
-          helperIds = JSON.parse(taskHelpersData);
-        } else if (Array.isArray(taskHelpersData)) {
-          helperIds = taskHelpersData;
-        }
-        
-        console.log(`   Found ${helperIds.length} associated helper(s)`);
-        
-        // Remove task from each helper's associated tasks list
-        for (const helperId of helperIds) {
-          const helperTasksKey = `helper:${helperId}:associated_tasks`;
-          const helperTasksData = await redis.get(helperTasksKey);
-          
-          if (helperTasksData) {
-            let taskIds = [];
-            if (typeof helperTasksData === 'string') {
-              taskIds = JSON.parse(helperTasksData);
-            } else if (Array.isArray(helperTasksData)) {
-              taskIds = helperTasksData;
-            }
-            
-            // Remove this task from helper's list
-            const updatedTaskIds = taskIds.filter(id => id !== task.id);
-            
-            if (updatedTaskIds.length > 0) {
-              await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedTaskIds));
-            } else {
-              await redis.del(helperTasksKey);
-            }
-            
-            console.log(`   ✅ Removed task from helper ${helperId}'s associations`);
-          }
-        }
-        
-        // Delete task's associated helpers list
-        await redis.del(taskHelpersKey);
-      }
-      
-      // Remove tracking keys if they exist
-      if (task.assignedHelperId) {
-        await redis.del(`tracking:task:${task.id}:helper:${task.assignedHelperId}`);
-        await redis.del(`tracking:task:${task.id}:helpseeker:${helpseekerId}`);
-        console.log(`   ✅ Removed tracking keys for assigned helper`);
-      }
-      
-      // Remove task actions (rejections/passes)
-      await redis.del(`task:${task.id}:actions`);
-      
-      console.log(`✅ Cancelled task ${task.id} and all associations removed from Redis`);
-    } catch (redisError) {
-      console.warn(`⚠️ Failed to remove cancelled task from Redis:`, redisError.message);
-    }
-
     res.status(200).json({
       success: true,
       message: "Task cancelled successfully",
@@ -1735,14 +1061,6 @@ const increaseReward = async (req, res) => {
     const oldBudget = task.budget;
     task.budget = parseFloat(task.budget) + parseFloat(additionalAmount);
     await task.save();
-
-    // Clear helper actions (rejections/passes) to give all helpers a fresh chance
-    try {
-      await redis.del(`task:${taskId}:actions`);
-      console.log(`✅ Cleared all helper actions for task ${taskId} after reward increase`);
-    } catch (redisError) {
-      console.warn(`⚠️ Failed to clear helper actions:`, redisError.message);
-    }
 
     // Notify helpers about increased reward
     const helpers = await Helper.findAll({
@@ -1872,6 +1190,5 @@ module.exports = {
   cancelTask,
   increaseReward,
   regenerateOTP,
-  getGoogleMapsDistances,
-  associateTasksWithHelper,
+
 };

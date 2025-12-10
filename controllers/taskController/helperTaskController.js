@@ -491,7 +491,6 @@ const acceptTask = async (req, res) => {
         hint: "This task may have been cancelled, completed, or removed from the queue",
       });
     }
-
     // Get task from database for full details
     const task = await Task.findByPk(taskId, {
       include: [
@@ -1421,4 +1420,6 @@ module.exports = {
   verifyOTPAndStartTask,
   getMyAcceptedTasks,
   getMyTaskDetails,
+  calculateDistance,
+  getGoogleMapsDistances,
 };
