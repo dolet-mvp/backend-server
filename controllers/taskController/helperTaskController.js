@@ -889,22 +889,8 @@ const rejectTask = async (req, res) => {
             
             console.log(`   Using search radius: ${searchRadius}km (env: ${envRadius}km, max: 100km)`);
             
-            // Use the new associateTasksWithHelper function
-            const { associateTasksWithHelper } = require('./helpseekerTaskController');
-            const associatedTasks = await associateTasksWithHelper(
-              helperId, 
-              helperLocation, 
-              searchRadius, 
-              [taskId] // Exclude the task they just rejected
-            );
-            
-            if (associatedTasks.length > 0) {
-              console.log(`   ✅ Associated ${associatedTasks.length} new task(s) with helper ${helperId}`);
-              console.log(`      Task: ${associatedTasks[0].taskId}`);
-              console.log(`      Distance: ${associatedTasks[0].distanceText}`);
-            } else {
-              console.log(`   ℹ️ No other available tasks found within radius`);
-            }
+            // Task reassignment is handled by findAndAssociateNearestHelper
+            console.log(`   ℹ️ Task reassignment will be handled automatically`);
           }
         }
       } catch (associateError) {
@@ -1369,22 +1355,8 @@ const passTask = async (req, res) => {
             
             console.log(`   Using search radius: ${searchRadius}km (env: ${envRadius}km, max: 100km)`);
             
-            // Use the new associateTasksWithHelper function (similar to how publishTask works)
-            const { associateTasksWithHelper } = require('./helpseekerTaskController');
-            const associatedTasks = await associateTasksWithHelper(
-              helperId, 
-              helperLocation, 
-              searchRadius, 
-              [taskId] // Exclude the task they just passed
-            );
-            
-            if (associatedTasks.length > 0) {
-              console.log(`   ✅ Associated ${associatedTasks.length} new task(s) with helper ${helperId}`);
-              console.log(`      Task: ${associatedTasks[0].taskId}`);
-              console.log(`      Distance: ${associatedTasks[0].distanceText}`);
-            } else {
-              console.log(`   ℹ️ No other available tasks found within radius`);
-            }
+            // Task reassignment is handled by findAndAssociateNearestHelper
+            console.log(`   ℹ️ Task reassignment will be handled automatically`);
           }
         }
       } catch (associateError) {
