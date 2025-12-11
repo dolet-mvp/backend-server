@@ -318,9 +318,13 @@ const initSocketServer = (server) => {
         const roomName = `job:search:${userId}`;
         socket.join(roomName);
         
+        console.log(`✅ [SOCKET] ========================================`);
         console.log(`✅ [SOCKET] Helper ${userId} joined job search`);
         console.log(`📍 [SOCKET] Location: ${helperLat}, ${helperLng}, Radius: ${searchRadius}km`);
-        console.log(`🔍 [SOCKET] Socket ${socket.id} jobSearchData:`, socket.jobSearchData);
+        console.log(`🔍 [SOCKET] Socket ID: ${socket.id}`);
+        console.log(`🔍 [SOCKET] Socket connected: ${socket.connected}`);
+        console.log(`🔍 [SOCKET] jobSearchData:`, socket.jobSearchData);
+        console.log(`✅ [SOCKET] ========================================`);
         
         socket.emit("joinedJobSearch", { 
           message: "Connected to real-time job updates",
@@ -741,13 +745,20 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
               }
 
               // Send new job to this helper
-              socket.emit("newJobAvailable", {
+              const jobPayload = {
                 ...taskData,
                 ...distanceInfo
-              });
+              };
+              
+              console.log(`📤 [SOCKET BROADCAST] Emitting to socket ${socketId}`);
+              console.log(`📤 [SOCKET BROADCAST] Helper ID: ${helperId}`);
+              console.log(`📤 [SOCKET BROADCAST] Event: newJobAvailable`);
+              console.log(`📤 [SOCKET BROADCAST] Payload:`, JSON.stringify(jobPayload, null, 2));
+              
+              socket.emit("newJobAvailable", jobPayload);
 
               broadcastCount++;
-              console.log(`📤 [SOCKET BROADCAST] ✅ Sent new job ${taskId} to helper ${helperId} (${distanceInfo.distanceText} away)`);
+              console.log(`📤 [SOCKET BROADCAST] ✅ Sent new job ${taskId} to helper ${helperId} via socket ${socketId} (${distanceInfo.distanceText} away)`);
             } else {
               console.log(`⚠️ [SOCKET BROADCAST] Helper ${helperId} is ${distance.toFixed(2)}km away (outside ${radius}km radius)`);
             }
