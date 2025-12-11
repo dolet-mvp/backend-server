@@ -251,38 +251,56 @@ const initSocketServer = (server) => {
     });
 
     // Handle joining job search (real-time available tasks for helpers)
-    socket.on("joinJobSearch", async () => {
+    socket.on("joinJobSearch", async (data) => {
       try {
+        console.log(`🔍 [SOCKET] Helper ${userId} requesting to join job search. Data:`, data);
+        
         if (userType !== "helper") {
           socket.emit("jobSearchError", { message: "Only helpers can search for jobs" });
           return;
         }
 
-        // Get helper's data from Redis (includes location)
-        const redis = require("../config/redis/redis");
-        const cachedHelper = await redis.get(`helper:online:${userId}`);
-        
-        if (!cachedHelper) {
-          socket.emit("jobSearchError", { 
-            message: "You must be online to search for jobs",
-            requiresAction: "Go online first"
-          });
-          return;
-        }
-
-        const helperData = typeof cachedHelper === 'string' ? JSON.parse(cachedHelper) : cachedHelper;
-        
-        // Get helper's address
         let helperLat, helperLng;
-        if (helperData.addresses && helperData.addresses.length > 0) {
-          const helperAddress = helperData.addresses.find(addr => addr.isDefault) || helperData.addresses[0];
-          if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
-            helperLat = parseFloat(helperAddress.latitude);
-            helperLng = parseFloat(helperAddress.longitude);
+        let searchRadius = 50; // Default 50km
+
+        // Priority 1: Use location data from client (most accurate, current location)
+        if (data && data.lat && data.lng) {
+          helperLat = parseFloat(data.lat);
+          helperLng = parseFloat(data.lng);
+          if (data.radius) {
+            searchRadius = parseFloat(data.radius);
+          }
+          console.log(`✅ [SOCKET] Using location from client: ${helperLat}, ${helperLng}, radius: ${searchRadius}km`);
+        } else {
+          // Priority 2: Get helper's data from Redis (includes location)
+          console.log(`📍 [SOCKET] No client location, checking Redis...`);
+          const redis = require("../config/redis/redis");
+          const cachedHelper = await redis.get(`helper:online:${userId}`);
+          
+          if (!cachedHelper) {
+            console.warn(`⚠️ [SOCKET] Helper ${userId} not found in Redis online helpers`);
+            socket.emit("jobSearchError", { 
+              message: "You must be online to search for jobs",
+              requiresAction: "Go online first"
+            });
+            return;
+          }
+
+          const helperData = typeof cachedHelper === 'string' ? JSON.parse(cachedHelper) : cachedHelper;
+          
+          // Get helper's address
+          if (helperData.addresses && helperData.addresses.length > 0) {
+            const helperAddress = helperData.addresses.find(addr => addr.isDefault) || helperData.addresses[0];
+            if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+              helperLat = parseFloat(helperAddress.latitude);
+              helperLng = parseFloat(helperAddress.longitude);
+              console.log(`✅ [SOCKET] Using location from Redis: ${helperLat}, ${helperLng}`);
+            }
           }
         }
 
         if (!helperLat || !helperLng) {
+          console.error(`❌ [SOCKET] No location available for helper ${userId}`);
           socket.emit("jobSearchError", { 
             message: "Please add your address with location coordinates to search for jobs"
           });
@@ -294,17 +312,20 @@ const initSocketServer = (server) => {
           helperId: userId,
           latitude: helperLat,
           longitude: helperLng,
-          radius: 50, // Default search radius in km
+          radius: searchRadius,
         };
 
         const roomName = `job:search:${userId}`;
         socket.join(roomName);
         
-        console.log(`🔍 [SOCKET] Helper ${userId} joined job search - Location: ${helperLat}, ${helperLng}`);
+        console.log(`✅ [SOCKET] Helper ${userId} joined job search`);
+        console.log(`📍 [SOCKET] Location: ${helperLat}, ${helperLng}, Radius: ${searchRadius}km`);
+        console.log(`🔍 [SOCKET] Socket ${socket.id} jobSearchData:`, socket.jobSearchData);
         
         socket.emit("joinedJobSearch", { 
           message: "Connected to real-time job updates",
-          location: { lat: helperLat, lng: helperLng }
+          location: { lat: helperLat, lng: helperLng },
+          radius: searchRadius
         });
 
         // Send initial available tasks (reuse getAvailableTasks logic)
@@ -648,15 +669,21 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
 
     const taskLat = parseFloat(taskLocation.lat);
     const taskLng = parseFloat(taskLocation.lng);
+    const taskId = taskData.taskId || taskData.id;
     let broadcastCount = 0;
+    let helpersInSearch = 0;
+    let eligibleHelpers = 0;
 
     // Get all connected sockets
     const sockets = io.sockets.sockets;
+    console.log(`🔍 [SOCKET BROADCAST] Checking ${sockets.size} connected sockets for task ${taskId}`);
     
     for (const [socketId, socket] of sockets) {
       // Only process helpers in job search
       if (socket.jobSearchData) {
+        helpersInSearch++;
         const { helperId, latitude, longitude, radius } = socket.jobSearchData;
+        console.log(`👤 [SOCKET BROADCAST] Checking helper ${helperId} - Socket: ${socketId}`);
 
         try {
           // Check if helper is in associated tasks list
@@ -670,12 +697,17 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
               : associatedTasksData;
           }
 
-          const taskId = taskData.taskId || taskData.id;
+          
+          console.log(`📋 [SOCKET BROADCAST] Helper ${helperId} associated tasks:`, associatedTaskIds);
           
           // Only send if task is in helper's associated list
           if (associatedTaskIds.includes(taskId)) {
+            eligibleHelpers++;
+            console.log(`✅ [SOCKET BROADCAST] Helper ${helperId} is eligible for task ${taskId}`);
+            
             // Calculate distance
             const distance = calculateDistance(latitude, longitude, taskLat, taskLng);
+            console.log(`📏 [SOCKET BROADCAST] Distance: ${distance.toFixed(2)}km (max: ${radius}km)`);
 
             if (distance <= radius) {
               // Get Google Maps distance for accurate info
@@ -715,8 +747,12 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
               });
 
               broadcastCount++;
-              console.log(`📤 [SOCKET BROADCAST] Sent new job ${taskId} to helper ${helperId} (${distanceInfo.distanceText} away)`);
+              console.log(`📤 [SOCKET BROADCAST] ✅ Sent new job ${taskId} to helper ${helperId} (${distanceInfo.distanceText} away)`);
+            } else {
+              console.log(`⚠️ [SOCKET BROADCAST] Helper ${helperId} is ${distance.toFixed(2)}km away (outside ${radius}km radius)`);
             }
+          } else {
+            console.log(`⚠️ [SOCKET BROADCAST] Task ${taskId} not in helper ${helperId}'s associated tasks`);
           }
         } catch (error) {
           console.error(`❌ [SOCKET BROADCAST] Error processing helper ${helperId}:`, error.message);
@@ -724,7 +760,11 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
       }
     }
 
-    console.log(`✅ [SOCKET BROADCAST] Broadcasted job ${taskData.taskId} to ${broadcastCount} helpers`);
+    console.log(`📊 [SOCKET BROADCAST] Summary for task ${taskData.taskId}:`);
+    console.log(`   - Total sockets: ${sockets.size}`);
+    console.log(`   - Helpers in job search: ${helpersInSearch}`);
+    console.log(`   - Eligible helpers (in associated list): ${eligibleHelpers}`);
+    console.log(`   - Successfully broadcasted to: ${broadcastCount} helpers`);
   } catch (error) {
     console.error("❌ [SOCKET BROADCAST] Error broadcasting new job:", error);
   }
