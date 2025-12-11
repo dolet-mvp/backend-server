@@ -226,15 +226,7 @@ const publishTask = async (req, res) => {
       
       console.log(`✅ Job ${task.id} stored in Redis successfully`);
 
-      // Broadcast new job to all helpers searching for jobs via socket
-      try {
-        await socketService.broadcastNewJobToSearchingHelpers(jobData);
-      } catch (socketError) {
-        console.error(`⚠️ Failed to broadcast job via socket:`, socketError.message);
-        // Continue execution even if socket broadcast fails
-      }
-
-      // Associate newly published task with online helpers asynchronously
+      // Associate newly published task with online helpers FIRST, then broadcast
       if (task.location && task.location.lat && task.location.lng) {
         setImmediate(async () => {
           try {
@@ -352,6 +344,14 @@ const publishTask = async (req, res) => {
                   
                   console.log(`✅ [PUBLISH] Task ${task.id} associated with helper ${closestHelper.helperId} (${closestHelper.distance.toFixed(2)}km)`);
                   console.log(`⏱️ [PUBLISH] Total time: ${Date.now() - startTime}ms`);
+                  
+                  // NOW broadcast to helpers via socket AFTER association is complete
+                  console.log(`📡 [PUBLISH] Broadcasting to helpers now that association is complete...`);
+                  try {
+                    await socketService.broadcastNewJobToSearchingHelpers(jobData);
+                  } catch (socketError) {
+                    console.error(`⚠️ [PUBLISH] Failed to broadcast job via socket:`, socketError.message);
+                  }
                 }
               }
             }
