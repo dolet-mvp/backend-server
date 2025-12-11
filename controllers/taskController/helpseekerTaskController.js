@@ -9,6 +9,7 @@ const jobMatchingService = require("../../services/jobMatchingService");
 const socketService = require("../../services/socketService");
 const redis = require("../../config/redis/redis");
 const { createNotification } = require("../../services/notificationService");
+const { getCachedDistance, batchCacheDistances } = require("../../services/distanceCacheService");
 
 
 const generateOTP = () => {
@@ -217,14 +218,17 @@ const publishTask = async (req, res) => {
       };
       
    
-      await redis.setex(`job:${task.id}`, 2592000, JSON.stringify(jobData));
+      // PERFORMANCE FIX: Batch Redis writes in parallel
+      const redisStart = Date.now();
+      await Promise.all([
+        redis.setex(`job:${task.id}`, 2592000, JSON.stringify(jobData)),
+        redis.zadd('jobs:published', {
+          score: Date.now(),
+          member: task.id // Store task ID, not key
+        })
+      ]);
       
-      await redis.zadd('jobs:published', {
-        score: Date.now(),
-        member: `job:${task.id}`,
-      });
-      
-      console.log(`✅ Job ${task.id} stored in Redis successfully`);
+      console.log(`✅ Job ${task.id} stored in Redis successfully (${Date.now() - redisStart}ms)`);
 
       // Associate newly published task with online helpers FIRST, then broadcast
       if (task.location && task.location.lat && task.location.lng) {
@@ -233,13 +237,13 @@ const publishTask = async (req, res) => {
             const startTime = Date.now();
             console.log(`🔗 [PUBLISH] Starting helper association for task ${task.id}`);
             
-            // Get all online helpers from Redis
-            const onlineHelperKeys = await redis.keys('helper:online:*');
-            console.log(`🔗 [PUBLISH] Found ${onlineHelperKeys.length} online helpers`);
+            // PERFORMANCE FIX: Use sorted set instead of keys()
+            const onlineHelperIds = await redis.zrange('helpers:available', 0, -1);
+            console.log(`🔗 [PUBLISH] Found ${onlineHelperIds.length} online helpers`);
             
-            if (onlineHelperKeys.length > 0) {
+            if (onlineHelperIds.length > 0) {
               const helpersData = await Promise.all(
-                onlineHelperKeys.map(key => redis.get(key))
+                onlineHelperIds.map(id => redis.get(`helper:online:${id}`))
               );
               
               const eligibleHelpers = [];
@@ -279,39 +283,103 @@ const publishTask = async (req, res) => {
                 const axios = require('axios');
                 const helpersWithDistance = [];
                 
+                // PERFORMANCE FIX: Check cache before calling Google Maps API
                 if (apiKey) {
-                  // Batch process helpers (25 at a time)
-                  const batchSize = 25;
-                  for (let i = 0; i < eligibleHelpers.length; i += batchSize) {
-                    const batch = eligibleHelpers.slice(i, i + batchSize);
-                    const originsStr = batch.map(h => `${h.latitude},${h.longitude}`).join('|');
+                  // First, check cache for all helpers
+                  const cacheCheckPromises = eligibleHelpers.map(async (helper) => {
+                    const cached = await getCachedDistance(
+                      helper.latitude,
+                      helper.longitude,
+                      task.location.lat,
+                      task.location.lng
+                    );
                     
-                    try {
-                      const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
-                        params: {
-                          origins: originsStr,
-                          destinations: `${task.location.lat},${task.location.lng}`,
-                          key: apiKey,
-                          units: 'metric',
-                        },
-                        timeout: 5000,
-                      });
-                      
-                      if (response.data.status === 'OK') {
-                        response.data.rows.forEach((row, index) => {
-                          if (row.elements[0] && row.elements[0].status === 'OK') {
-                            const distanceInKm = row.elements[0].distance.value / 1000;
-                            if (distanceInKm <= 50) {
-                              helpersWithDistance.push({
-                                helperId: batch[index].helperId,
-                                distance: distanceInKm
-                              });
-                            }
-                          }
-                        });
+                    if (cached && cached.distanceInMeters) {
+                      const distanceInKm = cached.distanceInMeters / 1000;
+                      if (distanceInKm <= 50) {
+                        return {
+                          helperId: helper.helperId,
+                          distance: distanceInKm,
+                          cached: true
+                        };
                       }
-                    } catch (error) {
-                      console.warn(`⚠️ Batch distance calculation failed:`, error.message);
+                    }
+                    
+                    return {
+                      helperId: helper.helperId,
+                      helper: helper,
+                      cached: false
+                    };
+                  });
+                  
+                  const cacheResults = await Promise.all(cacheCheckPromises);
+                  const cachedHelpers = cacheResults.filter(r => r.cached);
+                  const uncachedHelpers = cacheResults
+                    .filter(r => !r.cached)
+                    .map(r => r.helper);
+                  
+                  // Add cached results
+                  helpersWithDistance.push(...cachedHelpers);
+                  console.log(`📊 [PUBLISH] Cache hits: ${cachedHelpers.length}/${eligibleHelpers.length}`);
+                  
+                  // Only call API for uncached helpers
+                  if (uncachedHelpers.length > 0) {
+                    const batchSize = 25;
+                    for (let i = 0; i < uncachedHelpers.length; i += batchSize) {
+                      const batch = uncachedHelpers.slice(i, i + batchSize);
+                      const originsStr = batch.map(h => `${h.latitude},${h.longitude}`).join('|');
+                      
+                      try {
+                        const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
+                          params: {
+                            origins: originsStr,
+                            destinations: `${task.location.lat},${task.location.lng}`,
+                            key: apiKey,
+                            units: 'metric',
+                          },
+                          timeout: 5000,
+                        });
+                        
+                        if (response.data.status === 'OK') {
+                          const distancesToCache = [];
+                          
+                          response.data.rows.forEach((row, index) => {
+                            if (row.elements[0] && row.elements[0].status === 'OK') {
+                              const distanceInKm = row.elements[0].distance.value / 1000;
+                              
+                              // Cache this result
+                              distancesToCache.push({
+                                originLat: batch[index].latitude,
+                                originLng: batch[index].longitude,
+                                destLat: task.location.lat,
+                                destLng: task.location.lng,
+                                distanceData: {
+                                  distanceInMeters: row.elements[0].distance.value,
+                                  durationInSeconds: row.elements[0].duration.value,
+                                  distanceText: row.elements[0].distance.text,
+                                  durationText: row.elements[0].duration.text
+                                }
+                              });
+                              
+                              if (distanceInKm <= 50) {
+                                helpersWithDistance.push({
+                                  helperId: batch[index].helperId,
+                                  distance: distanceInKm
+                                });
+                              }
+                            }
+                          });
+                          
+                          // Batch cache all new results
+                          if (distancesToCache.length > 0) {
+                            batchCacheDistances(distancesToCache).catch(err => 
+                              console.error('Failed to cache distances:', err)
+                            );
+                          }
+                        }
+                      } catch (error) {
+                        console.warn(`⚠️ Batch distance calculation failed:`, error.message);
+                      }
                     }
                   }
                 }

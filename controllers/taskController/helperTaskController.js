@@ -6,8 +6,11 @@ const Helpseeker = require("../../models/authModel/helpseekerModel");
 const Address = require("../../models/addressModel/addressModel");
 const redis = require("../../config/redis/redis");
 const axios = require("axios");
+const { Sequelize, Transaction } = require("sequelize");
+const sequelize = require("../../dbConnection/dbConfig");
 const { findAndAssociateNearestHelper } = require("../helperController/helperController");
 const { getGoogleMapsDistances } = require("./helpseekerTaskController");
+const { getCachedDistance, batchCacheDistances } = require("../../services/distanceCacheService");
 
 // Generate 6-digit OTP
 const generateOTP = () => {
@@ -238,12 +241,14 @@ const getAvailableTasks = async (req, res) => {
       });
     }
 
-    // Get tasks from Redis ONLY - NO DATABASE FALLBACK
-    console.log("📡 Fetching tasks from Redis only...");
-    const redisKeys = await redis.keys('job:*');
-    let tasksFromRedis = [];
+    // PERFORMANCE FIX: Use sorted set instead of keys() for non-blocking operation
+    console.log("📡 Fetching tasks from Redis using sorted set...");
+    const fetchStart = Date.now();
     
-    if (!redisKeys || redisKeys.length === 0) {
+    // Get task IDs from sorted set (much faster than keys())
+    const taskIds = await redis.zrange('jobs:published', 0, -1);
+    
+    if (!taskIds || taskIds.length === 0) {
       console.log("ℹ️  No tasks found in Redis");
       return res.status(200).json({
         success: true,
@@ -264,9 +269,10 @@ const getAvailableTasks = async (req, res) => {
       });
     }
     
-    const redisPromises = redisKeys.map(key => redis.get(key));
+    // Batch fetch all task data
+    const redisPromises = taskIds.map(taskId => redis.get(`job:${taskId}`));
     const redisResults = await Promise.all(redisPromises);
-    tasksFromRedis = redisResults
+    const tasksFromRedis = redisResults
       .filter(result => result)
       .map(result => {
         // Handle both string and object responses from Upstash Redis
@@ -277,27 +283,50 @@ const getAvailableTasks = async (req, res) => {
       })
       .filter(task => task.status === 'in_queue');
 
-    console.log(`✅ Found ${tasksFromRedis.length} tasks in Redis with status 'in_queue'`);
+    console.log(`✅ Found ${tasksFromRedis.length} tasks in Redis with status 'in_queue' (fetched in ${Date.now() - fetchStart}ms)`);
 
-    // Validate tasks against database and clean up stale ones
-    const validTasks = [];
-    for (const redisTask of tasksFromRedis) {
-      const taskId = redisTask.taskId || redisTask.id;
-      
-      // Check database status
-      const dbTask = await Task.findByPk(taskId, {
-        attributes: ['id', 'status', 'assignedHelperId'],
-      });
-      
-      // If task doesn't exist in DB or has invalid status, remove from Redis
-      if (!dbTask || !['in_queue', 'published'].includes(dbTask.status) || dbTask.assignedHelperId) {
-        console.log(`🧹 Cleaning up stale task ${taskId} from Redis (DB status: ${dbTask?.status || 'not found'})`);
-        await redis.del(`job:${taskId}`);
-        await redis.zrem('jobs:published', `job:${taskId}`);
-        continue;
-      }
-      
-      validTasks.push(redisTask);
+    // PERFORMANCE FIX: Batch validate tasks against database - Single query instead of N queries
+    const taskIdsToValidate = tasksFromRedis.map(t => t.taskId || t.id);
+    const validationStart = Date.now();
+    
+    const validDbTasks = await Task.findAll({
+      where: {
+        id: { [Sequelize.Op.in]: taskIdsToValidate },
+        status: { [Sequelize.Op.in]: ['in_queue', 'published'] },
+        assignedHelperId: null
+      },
+      attributes: ['id', 'status', 'assignedHelperId']
+    });
+    
+    console.log(`⚡ Batch validation completed in ${Date.now() - validationStart}ms`);
+    
+    // Create Set for O(1) lookup
+    const validTaskIdsSet = new Set(validDbTasks.map(t => t.id));
+    
+    // Filter Redis tasks to only valid ones
+    const validTasks = tasksFromRedis.filter(task => {
+      const taskId = task.taskId || task.id;
+      return validTaskIdsSet.has(taskId);
+    });
+    
+    // Clean up stale tasks from Redis in parallel (non-blocking)
+    const staleTasks = tasksFromRedis.filter(task => {
+      const taskId = task.taskId || task.id;
+      return !validTaskIdsSet.has(taskId);
+    });
+    
+    if (staleTasks.length > 0) {
+      console.log(`🧹 Cleaning up ${staleTasks.length} stale task(s) from Redis...`);
+      // Don't await - clean up in background
+      Promise.all(
+        staleTasks.map(task => {
+          const taskId = task.taskId || task.id;
+          return Promise.all([
+            redis.del(`job:${taskId}`),
+            redis.zrem('jobs:published', taskId)
+          ]);
+        })
+      ).catch(err => console.warn('⚠️ Redis cleanup error:', err.message));
     }
     
     console.log(`✅ ${validTasks.length} valid tasks after database validation`);
@@ -331,17 +360,38 @@ const getAvailableTasks = async (req, res) => {
     
     console.log(`✅ ${tasksToProcess.length} tasks match helper's associations`);
 
-    // Filter out tasks this helper has already rejected or passed
-    const availableTasksForHelper = [];
-    for (const task of tasksToProcess) {
-      const taskId = task.taskId || task.id;
-      const actionResult = await hasHelperActedOnTask(taskId, helperId);
-      if (!actionResult.hasActed) {
-        availableTasksForHelper.push(task);
-      } else {
-        console.log(`⏭️ Helper ${helperId} already acted on task ${taskId} (${actionResult.action}), skipping...`);
+    // PERFORMANCE FIX: Batch fetch all task actions at once
+    const actionCheckStart = Date.now();
+    const actionKeys = tasksToProcess.map(task => `task:${task.taskId || task.id}:actions`);
+    const actionsResults = await Promise.all(
+      actionKeys.map(key => redis.get(key))
+    );
+    
+    // Create a Map for O(1) lookup of whether helper acted on each task
+    const helperActedOnTasks = new Map();
+    actionsResults.forEach((actionsData, index) => {
+      const taskId = tasksToProcess[index].taskId || tasksToProcess[index].id;
+      if (actionsData) {
+        const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
+        const helperAction = actions.find(a => a.helperId === helperId);
+        if (helperAction) {
+          helperActedOnTasks.set(taskId, helperAction.action);
+        }
       }
-    }
+    });
+    
+    console.log(`⚡ Batch action check completed in ${Date.now() - actionCheckStart}ms`);
+    
+    // Filter out tasks this helper has already rejected or passed
+    const availableTasksForHelper = tasksToProcess.filter(task => {
+      const taskId = task.taskId || task.id;
+      const action = helperActedOnTasks.get(taskId);
+      if (action) {
+        console.log(`⏭️ Helper ${helperId} already ${action} task ${taskId}, skipping...`);
+        return false;
+      }
+      return true;
+    });
     
     console.log(`✅ ${availableTasksForHelper.length} tasks available after filtering acted tasks`);
 
@@ -421,21 +471,35 @@ const getAvailableTasks = async (req, res) => {
         };
       });
 
-    // Get rejection counts for each task
-    const tasksWithRejectionInfo = await Promise.all(
-      nearbyTasks.map(async (task) => {
-        const actions = await getTaskActions(task.id);
-        const rejectionCount = actions.filter(a => a.action === 'rejected').length;
-        const passedCount = actions.filter(a => a.action === 'passed').length;
-        
-        return {
-          ...task,
-          rejectionCount,
-          passedCount,
-          totalHelperActions: actions.length,
-        };
-      })
+    // PERFORMANCE FIX: Batch fetch rejection counts for all tasks
+    const rejectionStart = Date.now();
+    const taskActionKeys = nearbyTasks.map(task => `task:${task.id}:actions`);
+    const taskActionsResults = await Promise.all(
+      taskActionKeys.map(key => redis.get(key))
     );
+    
+    const tasksWithRejectionInfo = nearbyTasks.map((task, index) => {
+      const actionsData = taskActionsResults[index];
+      let rejectionCount = 0;
+      let passedCount = 0;
+      let totalHelperActions = 0;
+      
+      if (actionsData) {
+        const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
+        rejectionCount = actions.filter(a => a.action === 'rejected').length;
+        passedCount = actions.filter(a => a.action === 'passed').length;
+        totalHelperActions = actions.length;
+      }
+      
+      return {
+        ...task,
+        rejectionCount,
+        passedCount,
+        totalHelperActions,
+      };
+    });
+    
+    console.log(`⚡ Batch rejection info completed in ${Date.now() - rejectionStart}ms`);
 
     res.status(200).json({
       success: true,
@@ -476,22 +540,30 @@ const getAvailableTasks = async (req, res) => {
 
 // Accept task directly (Helper) - Generates OTP and assigns task
 const acceptTask = async (req, res) => {
+  // Start transaction for atomic operations with row locking
+  const transaction = await sequelize.transaction({
+    isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED
+  });
+  
   try {
     const helperId = req.user.id;
     const { taskId } = req.params;
+    const startTime = Date.now();
 
     // Check if task exists in Redis first (source of truth for available tasks)
     const redisTaskKey = `job:${taskId}`;
     const cachedTask = await redis.get(redisTaskKey);
     
     if (!cachedTask) {
+      await transaction.rollback();
       return res.status(404).json({
         success: false,
         message: "Task not found or no longer available",
         hint: "This task may have been cancelled, completed, or removed from the queue",
       });
     }
-    // Get task from database for full details
+    
+    // Get task with EXCLUSIVE ROW LOCK to prevent race condition
     const task = await Task.findByPk(taskId, {
       include: [
         {
@@ -500,12 +572,17 @@ const acceptTask = async (req, res) => {
           attributes: ["id", "fullName", "email", "phone"],
         },
       ],
+      lock: transaction.LOCK.UPDATE, // FOR UPDATE - exclusive lock
+      transaction
     });
  
     if (!task) {
       // Task exists in Redis but not in database - clean up Redis
-      await redis.del(redisTaskKey);
-      await redis.zrem('jobs:published', redisTaskKey);
+      await transaction.rollback();
+      await Promise.all([
+        redis.del(redisTaskKey),
+        redis.zrem('jobs:published', taskId)
+      ]);
       
       return res.status(404).json({
         success: false,
@@ -516,8 +593,11 @@ const acceptTask = async (req, res) => {
     // Accept tasks with status "published" or "in_queue"
     if (task.status !== "in_queue" && task.status !== "published") {
       // Task status changed - remove from Redis cache
-      await redis.del(redisTaskKey);
-      await redis.zrem('jobs:published', redisTaskKey);
+      await transaction.rollback();
+      await Promise.all([
+        redis.del(redisTaskKey),
+        redis.zrem('jobs:published', taskId)
+      ]);
       
       return res.status(400).json({
         success: false,
@@ -528,15 +608,19 @@ const acceptTask = async (req, res) => {
       });
     }
 
-    // Check if task is already assigned
+    // Check if task is already assigned (protected by row lock)
     if (task.assignedHelperId) {
       // Task already assigned - remove from Redis cache
-      await redis.del(redisTaskKey);
-      await redis.zrem('jobs:published', redisTaskKey);
+      await transaction.rollback();
+      await Promise.all([
+        redis.del(redisTaskKey),
+        redis.zrem('jobs:published', taskId)
+      ]);
       
       return res.status(400).json({
         success: false,
         message: "This task has already been accepted by another helper",
+        hint: "Another helper accepted this task moments ago",
       });
     }
 
@@ -550,6 +634,7 @@ const acceptTask = async (req, res) => {
           attributes: ["id", "latitude", "longitude", "city", "state", "isDefault"],
         },
       ],
+      transaction
     });
 
     // Generate OTP
@@ -562,47 +647,39 @@ const acceptTask = async (req, res) => {
     task.verificationOtp = otp;
     task.otpGeneratedAt = new Date();
     task.isOtpVerified = false;
-    await task.save();
+    await task.save({ transaction });
 
     // Remove from queue if exists
     await TaskQueue.destroy({
       where: { taskId: task.id },
+      transaction
     });
-
-    // Remove task from Redis cache when accepted by helper - use correct key
-    try {
-      const redisTaskKey = `job:${task.id}`;
-      await redis.del(redisTaskKey);
-      await redis.zrem('jobs:published', redisTaskKey);
-      console.log(`✅ Task ${task.id} removed from Redis after acceptance`);
-    } catch (redisError) {
-      console.warn(`⚠️ Failed to remove task from Redis:`, redisError.message);
-      // Continue execution even if Redis update fails
-    }
-
-    // Remove helper from available helpers list in Redis since they accepted a task
-    try {
-      await redis.del(`helper:online:${helperId}`);
-      await redis.zrem('helpers:available', helperId);
-      console.log(`✅ Helper ${helperId} removed from available helpers in Redis after accepting task`);
-    } catch (redisError) {
-      console.warn(`⚠️ Failed to remove helper from Redis availability:`, redisError.message);
-      // Continue execution even if Redis update fails
-    }
-
-    // Clear all helper actions (rejections/passes) since task is now accepted
-    try {
-      await redis.del(`task:${taskId}:actions`);
-      console.log(`✅ Cleared all helper actions for task ${taskId} after acceptance`);
-    } catch (redisError) {
-      console.warn(`⚠️ Failed to clear helper actions:`, redisError.message);
-    }
-
+    
     // Update helper availability status in database
     await Helper.update(
       { isAvailable: false },
-      { where: { id: helperId } }
+      { where: { id: helperId }, transaction }
     );
+    
+    // Commit transaction - releases lock
+    await transaction.commit();
+    console.log(`⏱️ [ACCEPT] Transaction committed in ${Date.now() - startTime}ms`);
+
+    // Batch Redis cleanup operations for better performance
+    try {
+      const cleanupStart = Date.now();
+      await Promise.all([
+        redis.del(redisTaskKey),
+        redis.zrem('jobs:published', taskId),
+        redis.del(`helper:online:${helperId}`),
+        redis.zrem('helpers:available', helperId),
+        redis.del(`task:${taskId}:actions`)
+      ]);
+      console.log(`✅ Redis cleanup completed in ${Date.now() - cleanupStart}ms`);
+    } catch (redisError) {
+      console.warn(`⚠️ Failed to cleanup Redis:`, redisError.message);
+      // Continue execution even if Redis update fails
+    }
 
     // Store helper and helpseeker locations in Redis for real-time tracking
     try {
@@ -697,27 +774,27 @@ const acceptTask = async (req, res) => {
       // Continue execution even if location storage fails
     }
 
-    // Notify helpseeker with OTP and helper details
-    await Notification.create({
-      helpseekerId: task.helpseekerId,
-      userType: 'helpseeker',
-      taskId: task.id,
-      title: "Task Accepted by Helper",
-      message: `${helper.fullName} has accepted your task "${task.title}". OTP: ${otp}. Share this OTP with the helper to start the task.`,
-      type: "task_assigned",
-      priority: "high",
-    });
-
-    // Notify helper
-    await Notification.create({
-      helperId: helperId,
-      userType: 'helper',
-      taskId: task.id,
-      title: "Task Accepted Successfully",
-      message: `You have accepted "${task.title}". The helpseeker will share the OTP with you to start the task. Contact: ${task.creator.fullName} (${task.creator.phone || task.creator.email})`,
-      type: "task_assigned",
-      priority: "high",
-    });
+    // PERFORMANCE FIX: Create both notifications in parallel (non-blocking)
+    Promise.all([
+      Notification.create({
+        helpseekerId: task.helpseekerId,
+        userType: 'helpseeker',
+        taskId: task.id,
+        title: "Task Accepted by Helper",
+        message: `${helper.fullName} has accepted your task "${task.title}". OTP: ${otp}. Share this OTP with the helper to start the task.`,
+        type: "task_assigned",
+        priority: "high",
+      }),
+      Notification.create({
+        helperId: helperId,
+        userType: 'helper',
+        taskId: task.id,
+        title: "Task Accepted Successfully",
+        message: `You have accepted "${task.title}". The helpseeker will share the OTP with you to start the task. Contact: ${task.creator.fullName} (${task.creator.phone || task.creator.email})`,
+        type: "task_assigned",
+        priority: "high",
+      })
+    ]).catch(err => console.error('⚠️ Failed to create notifications:', err));
 
     res.status(200).json({
       success: true,
@@ -737,6 +814,12 @@ const acceptTask = async (req, res) => {
       },
     });
   } catch (error) {
+    // Rollback transaction on any error
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+      console.log('⚠️ Transaction rolled back due to error');
+    }
+    
     console.error("Accept task error:", error);
     res.status(500).json({
       success: false,
@@ -802,10 +885,21 @@ const rejectTask = async (req, res) => {
     // Store rejection in Redis immediately (even without reason)
     const actions = await storeHelperAction(taskId, helperId, 'rejected', rejectionReason);
     
+    // PERFORMANCE FIX: Batch fetch both association lists in parallel
+    const associationStart = Date.now();
+    const helperTasksKey = `helper:${helperId}:associated_tasks`;
+    const taskHelpersKey = `task:${taskId}:associated_helpers`;
+    
+    const [associatedTasksData, taskHelpersData] = await Promise.all([
+      redis.get(helperTasksKey),
+      redis.get(taskHelpersKey)
+    ]);
+    
+    console.log(`⚡ Fetched associations in ${Date.now() - associationStart}ms`);
+    
     // Remove this helper from task associations
     try {
-      const helperTasksKey = `helper:${helperId}:associated_tasks`;
-      const associatedTasksData = await redis.get(helperTasksKey);
+      const updateOps = [];
       
       if (associatedTasksData) {
         const tasksList = typeof associatedTasksData === 'string' 
@@ -814,14 +908,11 @@ const rejectTask = async (req, res) => {
         const updatedList = tasksList.filter(id => id !== taskId);
         
         if (updatedList.length > 0) {
-          await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedList));
+          updateOps.push(redis.setex(helperTasksKey, 43200, JSON.stringify(updatedList)));
         } else {
-          await redis.del(helperTasksKey);
+          updateOps.push(redis.del(helperTasksKey));
         }
       }
-      
-      const taskHelpersKey = `task:${taskId}:associated_helpers`;
-      const taskHelpersData = await redis.get(taskHelpersKey);
       
       if (taskHelpersData) {
         const helpersList = typeof taskHelpersData === 'string' 
@@ -830,10 +921,15 @@ const rejectTask = async (req, res) => {
         const updatedHelpers = helpersList.filter(id => id !== helperId);
         
         if (updatedHelpers.length > 0) {
-          await redis.setex(taskHelpersKey, 2592000, JSON.stringify(updatedHelpers));
+          updateOps.push(redis.setex(taskHelpersKey, 2592000, JSON.stringify(updatedHelpers)));
         } else {
-          await redis.del(taskHelpersKey);
+          updateOps.push(redis.del(taskHelpersKey));
         }
+      }
+      
+      // Execute all Redis updates in parallel
+      if (updateOps.length > 0) {
+        await Promise.all(updateOps);
       }
       
       console.log(`✅ Helper ${helperId} removed from task ${taskId} associations after rejection`);
@@ -900,9 +996,8 @@ const rejectTask = async (req, res) => {
       console.warn(`⚠️ Failed to reassign task:`, reassignError.message);
     }
     
-    // Get all online helpers to check if all have rejected
-    const onlineHelperKeys = await redis.keys('helper:online:*');
-    const onlineHelperCount = onlineHelperKeys.length;
+    // PERFORMANCE FIX: Use sorted set to get online helper count
+    const onlineHelperCount = await redis.zcard('helpers:available');
     const rejectionCount = actions.filter(a => a.action === 'rejected').length;
     const passedCount = actions.filter(a => a.action === 'passed').length;
     const totalActions = rejectionCount + passedCount;
@@ -910,8 +1005,8 @@ const rejectTask = async (req, res) => {
     // Check if all available helpers have acted on this task
     const allHelpersActed = totalActions >= onlineHelperCount;
    
-    // Notify helpseeker about rejection
-    await Notification.create({
+    // PERFORMANCE FIX: Send notification asynchronously (non-blocking)
+    Notification.create({
       helpseekerId: task.helpseekerId,
       userType: 'helpseeker',
       taskId: task.id,
@@ -919,7 +1014,7 @@ const rejectTask = async (req, res) => {
       message: `${helper.fullName} has declined your task "${task.title}". Reason: ${reason}${allHelpersActed ? ' (All available helpers have been shown this task)' : ''}`,
       type: "bid_rejected",
       priority: allHelpersActed ? "high" : "medium",
-    });
+    }).catch(err => console.error('⚠️ Failed to create notification:', err));
 
     res.status(200).json({
       success: true,

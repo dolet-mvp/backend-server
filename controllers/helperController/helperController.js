@@ -5,6 +5,7 @@ const Rating = require("../../models/ratingModel/ratingModel");
 const Address = require("../../models/addressModel/addressModel");
 const redis = require("../../config/redis/redis");
 const axios = require("axios");
+const { getCachedDistance, batchCacheDistances } = require("../../services/distanceCacheService");
 
 // Helper function to find and associate nearest available helper with a task
 const findAndAssociateNearestHelper = async (taskId, taskLocation, excludeHelperId = null) => {
@@ -69,47 +70,103 @@ const findAndAssociateNearestHelper = async (taskId, taskLocation, excludeHelper
       return null;
     }
     
-    const originStr = `${taskLocation.lat},${taskLocation.lng}`;
-    const destinationsStr = helperLocations.map(loc => `${loc.lat},${loc.lng}`).join('|');
+    // PERFORMANCE FIX: Check cache first before calling Google Maps API
+    const helpersWithDistance = [];
+    const uncachedIndices = [];
     
-    try {
-      const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
-        params: {
-          origins: originStr,
-          destinations: destinationsStr,
-          key: apiKey,
-          mode: 'driving',
-          units: 'metric',
-        },
-      });
+    // Check cache for each helper
+    for (let i = 0; i < helperLocations.length; i++) {
+      const cached = await getCachedDistance(
+        taskLocation.lat,
+        taskLocation.lng,
+        helperLocations[i].lat,
+        helperLocations[i].lng
+      );
       
-      if (response.data.status === 'OK') {
-        const elements = response.data.rows[0]?.elements || [];
-        const helpersWithDistance = [];
+      if (cached && cached.distanceInMeters) {
+        const distanceKm = cached.distanceInMeters / 1000;
+        if (distanceKm <= 50) {
+          helpersWithDistance.push({
+            helperId: helperIds[i],
+            distance: distanceKm,
+          });
+        }
+      } else {
+        uncachedIndices.push(i);
+      }
+    }
+    
+    console.log(`   📊 Cache hits: ${helperLocations.length - uncachedIndices.length}/${helperLocations.length}`);
+    
+    // Only call API for uncached distances
+    if (uncachedIndices.length > 0) {
+      try {
+        const uncachedLocations = uncachedIndices.map(i => helperLocations[i]);
+        const originStr = `${taskLocation.lat},${taskLocation.lng}`;
+        const destinationsStr = uncachedLocations.map(loc => `${loc.lat},${loc.lng}`).join('|');
         
-        for (let i = 0; i < elements.length; i++) {
-          if (elements[i].status === 'OK') {
-            const distanceKm = elements[i].distance.value / 1000;
-            if (distanceKm <= 50) { // Within 50km
-              helpersWithDistance.push({
-                helperId: helperIds[i],
-                distance: distanceKm,
+        const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
+          params: {
+            origins: originStr,
+            destinations: destinationsStr,
+            key: apiKey,
+            mode: 'driving',
+            units: 'metric',
+          },
+          timeout: 5000
+        });
+        
+        if (response.data.status === 'OK') {
+          const elements = response.data.rows[0]?.elements || [];
+          const distancesToCache = [];
+          
+          for (let i = 0; i < elements.length; i++) {
+            if (elements[i].status === 'OK') {
+              const originalIndex = uncachedIndices[i];
+              const distanceKm = elements[i].distance.value / 1000;
+              
+              // Cache this result
+              distancesToCache.push({
+                originLat: taskLocation.lat,
+                originLng: taskLocation.lng,
+                destLat: helperLocations[originalIndex].lat,
+                destLng: helperLocations[originalIndex].lng,
+                distanceData: {
+                  distanceInMeters: elements[i].distance.value,
+                  durationInSeconds: elements[i].duration.value,
+                  distanceText: elements[i].distance.text,
+                  durationText: elements[i].duration.text
+                }
               });
+              
+              if (distanceKm <= 50) {
+                helpersWithDistance.push({
+                  helperId: helperIds[originalIndex],
+                  distance: distanceKm,
+                });
+              }
             }
           }
-        }
-        
-        if (helpersWithDistance.length > 0) {
-          // Sort by distance and get nearest
-          helpersWithDistance.sort((a, b) => a.distance - b.distance);
-          const nearest = helpersWithDistance[0];
           
-          console.log(`   ✅ Found replacement helper: ${nearest.helperId} (${nearest.distance.toFixed(2)}km)`);
-          return nearest.helperId;
+          // Batch cache all new results
+          if (distancesToCache.length > 0) {
+            batchCacheDistances(distancesToCache).catch(err => 
+              console.error('Failed to cache distances:', err)
+            );
+          }
         }
+      } catch (apiError) {
+        console.warn(`   ⚠️ Google Maps API error:`, apiError.message);
       }
-    } catch (apiError) {
-      console.warn(`   ⚠️ Google Maps API error:`, apiError.message);
+    }
+    
+    if (helpersWithDistance.length > 0) {
+      // Sort by distance and get nearest
+      helpersWithDistance.sort((a, b) => a.distance - b.distance);
+      const nearest = helpersWithDistance[0];
+      
+      console.log(`   ✅ Found replacement helper: ${nearest.helperId} (${nearest.distance.toFixed(2)}km)`);
+      return nearest.helperId;
     }
     
     return null;
@@ -213,19 +270,18 @@ const toggleAvailability = async (req, res) => {
         onlineAt: new Date().toISOString(),
       };
 
-      // Upstash Redis automatically handles JSON serialization
-      await redis.set(`helper:online:${helper.id}`, helperData);
-      // Optional: Set expiration (e.g., 12 hours = 43200 seconds)
-      await redis.expire(`helper:online:${helper.id}`, 43200);
+      // PERFORMANCE FIX: Batch Redis operations in parallel
+      const redisStart = Date.now();
+      await Promise.all([
+        redis.set(`helper:online:${helper.id}`, helperData),
+        redis.expire(`helper:online:${helper.id}`, 43200),
+        redis.zadd('helpers:available', {
+          score: Date.now(),
+          member: helper.id,
+        })
+      ]);
       
-      // Add to sorted set for counting available helpers
-      // Using timestamp as score for ordering
-      await redis.zadd('helpers:available', {
-        score: Date.now(),
-        member: helper.id,
-      });
-      
-      console.log(`✅ Helper ${helper.id} marked as available in Redis`);
+      console.log(`✅ Helper ${helper.id} marked as available in Redis (${Date.now() - redisStart}ms)`);
       
       // ⚡ Run task association asynchronously (don't wait for it)
       // This allows the API to respond immediately while association happens in background
@@ -237,11 +293,12 @@ const toggleAvailability = async (req, res) => {
           
           console.log(`⏱️ [PERF] Starting task association for helper ${helper.id}`);
           
-          const allTaskKeys = await redis.keys('job:*');
-          console.log(`⏱️ [PERF] Found ${allTaskKeys.length} task keys in ${Date.now() - startTime}ms`);
+          // PERFORMANCE FIX: Use sorted set instead of keys()
+          const taskIds = await redis.zrange('jobs:published', 0, -1);
+          console.log(`⏱️ [PERF] Found ${taskIds.length} task IDs in ${Date.now() - startTime}ms`);
           
-          if (allTaskKeys && allTaskKeys.length > 0) {
-            const tasksPromises = allTaskKeys.map(key => redis.get(key));
+          if (taskIds && taskIds.length > 0) {
+            const tasksPromises = taskIds.map(id => redis.get(`job:${id}`));
             const tasksData = await Promise.all(tasksPromises);
             console.log(`⏱️ [PERF] Fetched task data in ${Date.now() - startTime}ms`);
           
@@ -337,44 +394,97 @@ const toggleAvailability = async (req, res) => {
                 
                 console.log(`⏱️ [PERF] Split into ${batches.length} batch(es)`);
                 
-                // Process batches in parallel
+                // PERFORMANCE FIX: Check cache before calling Google Maps API
                 const batchPromises = batches.map(async (batch, batchIndex) => {
                   try {
                     const batchStart = Date.now();
-                    const destinationsStr = batch.map(t => `${t.location.lat},${t.location.lng}`).join('|');
-                    const url = `https://maps.googleapis.com/maps/api/distancematrix/json`;
+                    const tasksInBatch = [];
+                    const uncachedTasks = [];
                     
-                    const response = await axios.get(url, {
-                      params: {
-                        origins: `${helperAddress.latitude},${helperAddress.longitude}`,
-                        destinations: destinationsStr,
-                        key: apiKey,
-                        units: 'metric',
-                      },
-                      timeout: 5000, // 5 second timeout
-                    });
-                    
-                    console.log(`⏱️ [PERF] Batch ${batchIndex + 1} completed in ${Date.now() - batchStart}ms`);
-                    
-                    if (response.data.status === 'OK' && response.data.rows[0]) {
-                      const elements = response.data.rows[0].elements;
+                    // Check cache for each task in batch
+                    for (const task of batch) {
+                      const cached = await getCachedDistance(
+                        helperAddress.latitude,
+                        helperAddress.longitude,
+                        task.location.lat,
+                        task.location.lng
+                      );
                       
-                      return batch.map((task, index) => {
-                        if (elements[index] && elements[index].status === 'OK') {
-                          const distanceInMeters = elements[index].distance.value;
-                          const distanceInKm = distanceInMeters / 1000;
-                          
-                          if (distanceInKm <= 50) {
-                            return {
-                              taskId: task.taskId,
-                              distance: distanceInKm,
-                            };
-                          }
+                      if (cached && cached.distanceInMeters) {
+                        const distanceInKm = cached.distanceInMeters / 1000;
+                        if (distanceInKm <= 50) {
+                          tasksInBatch.push({
+                            taskId: task.taskId,
+                            distance: distanceInKm,
+                          });
                         }
-                        return null;
-                      }).filter(Boolean);
+                      } else {
+                        uncachedTasks.push(task);
+                      }
                     }
-                    return [];
+                    
+                    console.log(`⏱️ [PERF] Batch ${batchIndex + 1}: Cache hits: ${batch.length - uncachedTasks.length}/${batch.length}`);
+                    
+                    // Only call API for uncached tasks
+                    if (uncachedTasks.length > 0) {
+                      const destinationsStr = uncachedTasks.map(t => `${t.location.lat},${t.location.lng}`).join('|');
+                      const url = `https://maps.googleapis.com/maps/api/distancematrix/json`;
+                      
+                      const response = await axios.get(url, {
+                        params: {
+                          origins: `${helperAddress.latitude},${helperAddress.longitude}`,
+                          destinations: destinationsStr,
+                          key: apiKey,
+                          units: 'metric',
+                        },
+                        timeout: 5000,
+                      });
+                      
+                      console.log(`⏱️ [PERF] Batch ${batchIndex + 1} API call completed in ${Date.now() - batchStart}ms`);
+                      
+                      if (response.data.status === 'OK' && response.data.rows[0]) {
+                        const elements = response.data.rows[0].elements;
+                        const distancesToCache = [];
+                        
+                        uncachedTasks.forEach((task, index) => {
+                          if (elements[index] && elements[index].status === 'OK') {
+                            const distanceInMeters = elements[index].distance.value;
+                            const distanceInKm = distanceInMeters / 1000;
+                            
+                            // Cache this result
+                            distancesToCache.push({
+                              originLat: helperAddress.latitude,
+                              originLng: helperAddress.longitude,
+                              destLat: task.location.lat,
+                              destLng: task.location.lng,
+                              distanceData: {
+                                distanceInMeters: elements[index].distance.value,
+                                durationInSeconds: elements[index].duration.value,
+                                distanceText: elements[index].distance.text,
+                                durationText: elements[index].duration.text
+                              }
+                            });
+                            
+                            if (distanceInKm <= 50) {
+                              tasksInBatch.push({
+                                taskId: task.taskId,
+                                distance: distanceInKm,
+                              });
+                            }
+                          }
+                        });
+                        
+                        // Batch cache all new results
+                        if (distancesToCache.length > 0) {
+                          batchCacheDistances(distancesToCache).catch(err => 
+                            console.error('Failed to cache distances:', err)
+                          );
+                        }
+                      }
+                    }
+                    
+                    console.log(`⏱️ [PERF] Batch ${batchIndex + 1} total time: ${Date.now() - batchStart}ms`);
+                    return tasksInBatch;
                   } catch (error) {
                     console.warn(`⚠️ Batch API call failed:`, error.message);
                     return [];
@@ -430,10 +540,14 @@ const toggleAvailability = async (req, res) => {
       // If helper goes offline, remove from Redis immediately
       console.log(`\n📴 Helper ${helper.id} going offline...`);
       
-      await redis.del(`helper:online:${helper.id}`);
-      await redis.zrem('helpers:available', helper.id);
+      // PERFORMANCE FIX: Batch Redis operations
+      const offlineStart = Date.now();
+      await Promise.all([
+        redis.del(`helper:online:${helper.id}`),
+        redis.zrem('helpers:available', helper.id)
+      ]);
       
-      console.log(`✅ Helper ${helper.id} marked as offline in Redis`);
+      console.log(`✅ Helper ${helper.id} marked as offline in Redis (${Date.now() - offlineStart}ms)`);
       
       // ⚡ Run task reassignment asynchronously (don't wait for it)
       // This allows the API to respond immediately while reassignment happens in background
