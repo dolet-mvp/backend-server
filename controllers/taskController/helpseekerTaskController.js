@@ -664,18 +664,46 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 // Get distances using Google Maps Distance Matrix API
 const getGoogleMapsDistances = async (origin, destinations) => {
   try {
-    const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+    const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY?.trim();
     
     if (!GOOGLE_MAPS_API_KEY) {
       console.warn("⚠️ Google Maps API key not found, falling back to Haversine formula");
       return null;
     }
 
+    // Validate destinations array
+    if (!destinations || destinations.length === 0) {
+      console.warn("⚠️ No destinations provided for Google Maps API");
+      return null;
+    }
+
+    // Validate and filter destinations
+    const validDestinations = destinations.filter(dest => 
+      dest && 
+      dest.lat != null && 
+      dest.lng != null && 
+      !isNaN(dest.lat) && 
+      !isNaN(dest.lng)
+    );
+
+    if (validDestinations.length === 0) {
+      console.warn("⚠️ No valid destinations with coordinates");
+      return null;
+    }
+
+    // Validate origin
+    if (!origin || origin.lat == null || origin.lng == null || isNaN(origin.lat) || isNaN(origin.lng)) {
+      console.warn("⚠️ Invalid origin coordinates");
+      return null;
+    }
+
     // Format origin and destinations for API
     const originStr = `${origin.lat},${origin.lng}`;
-    const destinationsStr = destinations
+    const destinationsStr = validDestinations
       .map((dest) => `${dest.lat},${dest.lng}`)
       .join("|");
+
+    console.log(`🔍 Google Maps API Request - Origin: ${originStr}, Destinations count: ${validDestinations.length}`);
 
     const url = `https://maps.googleapis.com/maps/api/distancematrix/json`;
     
@@ -684,13 +712,16 @@ const getGoogleMapsDistances = async (origin, destinations) => {
         origins: originStr,
         destinations: destinationsStr,
         key: GOOGLE_MAPS_API_KEY,
-        mode: "driving", // or "walking", "bicycling", "transit"
+        mode: "driving",
         units: "metric",
       },
     });
 
     if (response.data.status !== "OK") {
       console.warn(`⚠️ Google Maps API returned status: ${response.data.status}`);
+      if (response.data.error_message) {
+        console.warn(`⚠️ Error message: ${response.data.error_message}`);
+      }
       return null;
     }
 
