@@ -448,22 +448,29 @@ const publishTask = async (req, res) => {
         console.error(`Job matching failed for task ${task.id}:`, err);
       });
     } else {
-      // For non-location tasks, notify all approved helpers (fallback)
-      const helpers = await Helper.findAll({
-        where: { verificationStatus: "approved", isApproved: true },
+      // FIX PERFORMANCE: Move notifications to background (non-blocking)
+      setImmediate(async () => {
+        try {
+          const helpers = await Helper.findAll({
+            where: { verificationStatus: "approved", isApproved: true },
+          });
+
+          const notifications = helpers.map((helper) => ({
+            helperId: helper.id,
+            userType: 'helper',
+            taskId: task.id,
+            title: "New Task Available",
+            message: `New task: ${task.title}`,
+            type: "task_created",
+            priority: task.priority,
+          }));
+
+          await Notification.bulkCreate(notifications);
+          console.log(`✅ Sent notifications to ${helpers.length} helpers for non-location task ${task.id}`);
+        } catch (notifError) {
+          console.error(`⚠️ Failed to send notifications for task ${task.id}:`, notifError.message);
+        }
       });
-
-      const notifications = helpers.map((helper) => ({
-        helperId: helper.id,
-        userType: 'helper',
-        taskId: task.id,
-        title: "New Task Available",
-        message: `New task: ${task.title}`,
-        type: "task_created",
-        priority: task.priority,
-      }));
-
-      await Notification.bulkCreate(notifications);
     }
 
     res.status(200).json({
