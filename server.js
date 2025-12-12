@@ -63,10 +63,6 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// PERFORMANCE FIX: Add performance monitoring middleware
-const performanceMonitor = require("./middleware/performanceMonitor");
-app.use(performanceMonitor);
-
 // Import block check middleware
 const { checkUserBlocked } = require("./middleware/blockCheckMiddleware");
 
@@ -87,7 +83,6 @@ const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
 const geminiRoutes = require("./routes/aiRoute/gemniRoute");
 const reportRoutes = require("./routes/reportRoute/reportRoute");
 const blockRoutes = require("./routes/blockRoute/blockRoute");
-const performanceRoutes = require("./routes/performanceRoute/performanceRoute");
 const optionalAuthentication = require("./middleware/authMiddleware").optionalAuthentication;
 
 
@@ -155,14 +150,6 @@ app.use(
 app.use(
   "/api/notifications",
   diagnosticRoutes
-);
-
-
-
-// Performance monitoring routes
-app.use(
-  "/api/performance",
-  performanceRoutes
 );
 
 // Report routes

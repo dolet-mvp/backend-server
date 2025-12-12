@@ -92,7 +92,7 @@ async function batchCacheDistances(distanceResults) {
       const cacheKey = getCacheKey(originLat, originLng, destLat, destLng);
       const dataToCache = {
         ...distanceData,
-        cachedAt: Date.now()
+        cachedAt: Date.now()    
       };
       
       return redis.setex(cacheKey, 86400, JSON.stringify(dataToCache));
