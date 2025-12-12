@@ -394,8 +394,11 @@ const updateLocation = async (req, res) => {
     console.log(`📍 [TRACKING] Stored location in Redis: ${redisKey}`);
 
     // Broadcast real-time location update to helpseeker via socket
-    socketService.io.to(`task:${taskId}:tracking`).emit('helperLocationUpdate', locationData);
-    console.log(`📍 [TRACKING] Broadcasted helper location for task ${taskId}`);
+    const io = socketService.getIO();
+    if (io) {
+      io.to(`task:${taskId}:tracking`).emit('helperLocationUpdate', locationData);
+      console.log(`📍 [TRACKING] Broadcasted helper location for task ${taskId}`);
+    }
 
     res.status(200).json({
       success: true,
