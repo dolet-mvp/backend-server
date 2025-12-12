@@ -579,14 +579,8 @@ const acceptTask = async (req, res) => {
   
   try {
     // Get task with EXCLUSIVE ROW LOCK IMMEDIATELY to prevent concurrent access
+    // Note: We cannot use include with FOR UPDATE in PostgreSQL, so lock first then fetch creator
     const task = await Task.findByPk(taskId, {
-      include: [
-        {
-          model: Helpseeker,
-          as: "creator",
-          attributes: ["id", "fullName", "email", "phone"],
-        },
-      ],
       lock: transaction.LOCK.UPDATE, // FOR UPDATE - blocks other helpers
       transaction
     });
@@ -676,6 +670,12 @@ const acceptTask = async (req, res) => {
           attributes: ["id", "latitude", "longitude", "city", "state", "isDefault"],
         },
       ],
+      transaction
+    });
+
+    // Fetch creator (helpseeker) details separately (cannot include with FOR UPDATE lock)
+    const creator = await Helpseeker.findByPk(task.helpseekerId, {
+      attributes: ["id", "fullName", "email", "phone"],
       transaction
     });
 
@@ -820,7 +820,7 @@ const acceptTask = async (req, res) => {
         userType: 'helper',
         taskId: task.id,
         title: "Task Accepted Successfully",
-        message: `You have accepted "${task.title}". The helpseeker will share the OTP with you to start the task. Contact: ${task.creator.fullName} (${task.creator.phone || task.creator.email})`,
+        message: `You have accepted "${task.title}". The helpseeker will share the OTP with you to start the task. Contact: ${creator.fullName} (${creator.phone || creator.email})`,
         type: "task_assigned",
         priority: "high",
       })
@@ -835,10 +835,10 @@ const acceptTask = async (req, res) => {
         status: "assigned",
         acceptedAt: task.acceptedAt,
         helpseeker: {
-          id: task.creator.id,
-          name: task.creator.fullName,
-          email: task.creator.email,
-          phone: task.creator.phone,
+          id: creator.id,
+          name: creator.fullName,
+          email: creator.email,
+          phone: creator.phone,
         },
         message: "Wait for helpseeker to share the OTP with you to start the task",
       },
