@@ -434,18 +434,20 @@ const publishTask = async (req, res) => {
     }
 
     if (task.locationRequired && task.location && task.location.lat && task.location.lng) {
-      // Trigger job matching service asynchronously (non-blocking)
-      jobMatchingService.startJobMatching({
-        taskId: task.id,
-        userId: helpseekerId,
-        title: task.title,
-        description: task.description,
-        budget: task.budget,
-        category: task.category,
-        latitude: task.location.lat,
-        longitude: task.location.lng,
-      }).catch(err => {
-        console.error(`Job matching failed for task ${task.id}:`, err);
+      // FIX PERFORMANCE: Move job matching to background (non-blocking)
+      setImmediate(() => {
+        jobMatchingService.startJobMatching({
+          taskId: task.id,
+          userId: helpseekerId,
+          title: task.title,
+          description: task.description,
+          budget: task.budget,
+          category: task.category,
+          latitude: task.location.lat,
+          longitude: task.location.lng,
+        }).catch(err => {
+          console.error(`Job matching failed for task ${task.id}:`, err);
+        });
       });
     } else {
       // FIX PERFORMANCE: Move notifications to background (non-blocking)
