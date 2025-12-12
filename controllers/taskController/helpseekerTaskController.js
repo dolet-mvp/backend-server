@@ -166,11 +166,14 @@ const createTask = async (req, res) => {
 };
 
 const publishTask = async (req, res) => {
+  const publishStartTime = Date.now();
   try {
     const { taskId } = req.params;
     const helpseekerId = req.user.id;
 
+    console.log(`⏱️ [PUBLISH] Starting publish for task ${taskId}`);
     const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
+    console.log(`⏱️ [PUBLISH] Task found in ${Date.now() - publishStartTime}ms`);
 
     if (!task) {
       return res.status(404).json({
@@ -186,9 +189,12 @@ const publishTask = async (req, res) => {
       });
     }
 
+    const saveStart = Date.now();
     task.status = "in_queue";
     await task.save();
+    console.log(`⏱️ [PUBLISH] Task saved in ${Date.now() - saveStart}ms`);
 
+    const queueStart = Date.now();
     const queueCount = await TaskQueue.count();
 
     // Add to queue
@@ -197,6 +203,7 @@ const publishTask = async (req, res) => {
       queuePosition: queueCount + 1,
       priority: task.priority === "urgent" ? 10 : task.priority === "high" ? 5 : 0,
     });
+    console.log(`⏱️ [PUBLISH] Queue entry created in ${Date.now() - queueStart}ms`);
 
     // Store the published job in Redis
     try {
@@ -228,14 +235,15 @@ const publishTask = async (req, res) => {
         })
       ]);
       
-      console.log(`✅ Job ${task.id} stored in Redis successfully (${Date.now() - redisStart}ms)`);
+      console.log(`⏱️ [PUBLISH] Redis writes completed in ${Date.now() - redisStart}ms`);
+      console.log(`⏱️ [PUBLISH] Starting helper association (non-blocking) at ${Date.now() - publishStartTime}ms from start`);
 
       // Associate newly published task with online helpers FIRST, then broadcast
       if (task.location && task.location.lat && task.location.lng) {
         setImmediate(async () => {
           try {
             const startTime = Date.now();
-            console.log(`🔗 [PUBLISH] Starting helper association for task ${task.id}`);
+            console.log(`🔗 [PUBLISH-BG] Helper association started for task ${task.id}`);
             
             // PERFORMANCE FIX: Use sorted set instead of keys()
             const onlineHelperIds = await redis.zrange('helpers:available', 0, -1);
@@ -475,6 +483,7 @@ const publishTask = async (req, res) => {
       });
     }
 
+    console.log(`⏱️ [PUBLISH] Total time: ${Date.now() - publishStartTime}ms - Sending response now`);
     res.status(200).json({
       success: true,
       message: "Task published to queue successfully",
