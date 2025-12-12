@@ -119,14 +119,32 @@ async function trackEndpointStats(endpoint, duration) {
     const statsKey = `perf:stats:${endpoint}`;
     const stats = await redis.get(statsKey);
     
-    let endpointStats = stats ? JSON.parse(stats) : {
-      endpoint,
-      count: 0,
-      totalDuration: 0,
-      minDuration: Infinity,
-      maxDuration: 0,
-      avgDuration: 0,
-    };
+    let endpointStats;
+    if (stats && typeof stats === 'string') {
+      try {
+        endpointStats = JSON.parse(stats);
+      } catch (parseError) {
+        console.warn(`⚠️ Invalid JSON in stats for ${endpoint}, resetting...`);
+        await redis.del(statsKey);
+        endpointStats = {
+          endpoint,
+          count: 0,
+          totalDuration: 0,
+          minDuration: Infinity,
+          maxDuration: 0,
+          avgDuration: 0,
+        };
+      }
+    } else {
+      endpointStats = {
+        endpoint,
+        count: 0,
+        totalDuration: 0,
+        minDuration: Infinity,
+        maxDuration: 0,
+        avgDuration: 0,
+      };
+    }
     
     // Update statistics
     endpointStats.count += 1;

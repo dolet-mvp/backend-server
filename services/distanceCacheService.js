@@ -40,10 +40,16 @@ async function getCachedDistance(originLat, originLng, destLat, destLng) {
     const cacheKey = getCacheKey(originLat, originLng, destLat, destLng);
     const cached = await redis.get(cacheKey);
     
-    if (cached) {
-      const data = JSON.parse(cached);
-      console.log(`🎯 Cache HIT: ${cacheKey} (saved API call)`);
-      return data;
+    if (cached && typeof cached === 'string') {
+      try {
+        const data = JSON.parse(cached);
+        console.log(`🎯 Cache HIT: ${cacheKey} (saved API call)`);
+        return data;
+      } catch (parseError) {
+        console.warn(`⚠️ Invalid JSON in cache for ${cacheKey}, clearing...`);
+        await redis.del(cacheKey);
+        return null;
+      }
     }
     
     console.log(`⚠️ Cache MISS: ${cacheKey}`);
