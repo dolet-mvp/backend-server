@@ -10,6 +10,8 @@ const socketService = require("../../services/socketService");
 const redis = require("../../config/redis/redis");
 const { createNotification } = require("../../services/notificationService");
 const { getCachedDistance, batchCacheDistances } = require("../../services/distanceCacheService");
+const { sequelize } = require("../../dbConnection/dbConfig");
+const { Transaction } = require("sequelize");
 
 
 const generateOTP = () => {
@@ -167,15 +169,28 @@ const createTask = async (req, res) => {
 
 const publishTask = async (req, res) => {
   const publishStartTime = Date.now();
+  let transaction;
   try {
     const { taskId } = req.params;
     const helpseekerId = req.user.id;
 
     console.log(`⏱️ [PUBLISH] Starting publish for task ${taskId}`);
-    const task = await Task.findOne({ where: { id: taskId, helpseekerId } });
+
+    // Use transaction + row lock to make publish idempotent per task
+    transaction = await sequelize.transaction({
+      isolationLevel: Transaction.ISOLATION_LEVELS.SERIALIZABLE,
+    });
+
+    const task = await Task.findOne({
+      where: { id: taskId, helpseekerId },
+      lock: transaction.LOCK.UPDATE,
+      transaction,
+    });
     console.log(`⏱️ [PUBLISH] Task found in ${Date.now() - publishStartTime}ms`);
 
     if (!task) {
+      await transaction.rollback();
+      transaction = null;
       return res.status(404).json({
         success: false,
         message: "Task not found",
@@ -183,6 +198,9 @@ const publishTask = async (req, res) => {
     }
 
     if (task.status !== "draft") {
+      // Another publish may have already moved this task out of draft
+      await transaction.rollback();
+      transaction = null;
       return res.status(400).json({
         success: false,
         message: "Only draft tasks can be published",
@@ -191,19 +209,24 @@ const publishTask = async (req, res) => {
 
     const saveStart = Date.now();
     task.status = "in_queue";
-    await task.save();
+    await task.save({ transaction });
     console.log(`⏱️ [PUBLISH] Task saved in ${Date.now() - saveStart}ms`);
 
     const queueStart = Date.now();
-    const queueCount = await TaskQueue.count();
+    const queueCount = await TaskQueue.count({ transaction });
 
-    // Add to queue
+    // Ensure only one queue row per task inside the same transaction
+    await TaskQueue.destroy({ where: { taskId: task.id }, transaction });
+
     const queueEntry = await TaskQueue.create({
       taskId: task.id,
       queuePosition: queueCount + 1,
       priority: task.priority === "urgent" ? 10 : task.priority === "high" ? 5 : 0,
-    });
+    }, { transaction });
     console.log(`⏱️ [PUBLISH] Queue entry created in ${Date.now() - queueStart}ms`);
+
+    await transaction.commit();
+    transaction = null;
 
     // Store the published job in Redis
     try {
@@ -490,6 +513,10 @@ const publishTask = async (req, res) => {
       data: { task, queuePosition: queueEntry.queuePosition },
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("Publish task error:", error);
     res.status(500).json({
       success: false,
