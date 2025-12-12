@@ -1429,66 +1429,73 @@ const passTask = async (req, res) => {
       
       console.log(`✅ Helper ${helperId} removed from task ${taskId} associations after passing`);
       
-      // Find and associate the nearest available helper to the passed task
-      if (task.location || (task.steps && task.steps[0] && task.steps[0].location)) {
-        const taskLocation = task.location || task.steps[0].location;
-        
-        // Use the utility function to find and associate nearest helper, excluding this helper
-        const replacementHelperId = await findAndAssociateNearestHelper(taskId, taskLocation, helperId);
-        
-        if (replacementHelperId) {
-          // Update task association with new helper
-          await redis.setex(`task:${taskId}:associated_helpers`, 2592000, JSON.stringify([replacementHelperId]));
-          
-          // Add task to new helper's list
-          const newHelperTasksKey = `helper:${replacementHelperId}:associated_tasks`;
-          const newHelperTasksData = await redis.get(newHelperTasksKey);
-          let newHelperTasks = [];
-          
-          if (newHelperTasksData) {
-            newHelperTasks = typeof newHelperTasksData === 'string' ? JSON.parse(newHelperTasksData) : newHelperTasksData;
-          }
-          
-          if (!newHelperTasks.includes(taskId)) {
-            newHelperTasks.push(taskId);
-            await redis.setex(newHelperTasksKey, 43200, JSON.stringify(newHelperTasks));
-          }
-          
-          console.log(`✅ Task ${taskId} reassigned to replacement helper ${replacementHelperId}`);
-        } else {
-          console.log(`⚠️ No replacement helper found for task ${taskId}`);
-        }
-      }
-      
-      // Now find other available tasks and associate them with this helper
-      console.log(`\n🔄 Searching for other available tasks to associate with helper ${helperId}...`);
-      try {
-        // Get helper's location
-        const helperData = await redis.get(`helper:online:${helperId}`);
-        if (helperData) {
-          const helper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
-          const helperAddress = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
-          
-          if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
-            const helperLocation = {
-              lat: parseFloat(helperAddress.latitude),
-              lng: parseFloat(helperAddress.longitude)
-            };
-            // Use max 100km to prevent associating with tasks too far away
-            const envRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
-            const searchRadius = Math.min(envRadius, 100);
+      // FIX PERFORMANCE: Move helper reassignment to background (non-blocking)
+      setImmediate(async () => {
+        try {
+          // Find and associate the nearest available helper to the passed task
+          if (task.location || (task.steps && task.steps[0] && task.steps[0].location)) {
+            const taskLocation = task.location || task.steps[0].location;
             
-            console.log(`   Using search radius: ${searchRadius}km (env: ${envRadius}km, max: 100km)`);
+            // Use the utility function to find and associate nearest helper, excluding this helper
+            const replacementHelperId = await findAndAssociateNearestHelper(taskId, taskLocation, helperId);
             
-            // Task reassignment is handled by findAndAssociateNearestHelper
-            console.log(`   ℹ️ Task reassignment will be handled automatically`);
+            if (replacementHelperId) {
+              // Update task association with new helper
+              await redis.setex(`task:${taskId}:associated_helpers`, 2592000, JSON.stringify([replacementHelperId]));
+              
+              // Add task to new helper's list
+              const newHelperTasksKey = `helper:${replacementHelperId}:associated_tasks`;
+              const newHelperTasksData = await redis.get(newHelperTasksKey);
+              let newHelperTasks = [];
+              
+              if (newHelperTasksData) {
+                newHelperTasks = typeof newHelperTasksData === 'string' ? JSON.parse(newHelperTasksData) : newHelperTasksData;
+              }
+              
+              if (!newHelperTasks.includes(taskId)) {
+                newHelperTasks.push(taskId);
+                await redis.setex(newHelperTasksKey, 43200, JSON.stringify(newHelperTasks));
+              }
+              
+              console.log(`✅ Task ${taskId} reassigned to replacement helper ${replacementHelperId}`);
+            } else {
+              console.log(`⚠️ No replacement helper found for task ${taskId}`);
+            }
           }
+          
+          // Now find other available tasks and associate them with this helper
+          console.log(`\n🔄 Searching for other available tasks to associate with helper ${helperId}...`);
+          try {
+            // Get helper's location
+            const helperData = await redis.get(`helper:online:${helperId}`);
+            if (helperData) {
+              const helper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
+              const helperAddress = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
+              
+              if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
+                const helperLocation = {
+                  lat: parseFloat(helperAddress.latitude),
+                  lng: parseFloat(helperAddress.longitude)
+                };
+                // Use max 100km to prevent associating with tasks too far away
+                const envRadius = parseFloat(process.env.TASK_SEARCH_RADIUS || 50);
+                const searchRadius = Math.min(envRadius, 100);
+                
+                console.log(`   Using search radius: ${searchRadius}km (env: ${envRadius}km, max: 100km)`);
+                
+                // Task reassignment is handled by findAndAssociateNearestHelper
+                console.log(`   ℹ️ Task reassignment will be handled automatically`);
+              }
+            }
+          } catch (associateError) {
+            console.warn(`⚠️ Failed to associate other tasks:`, associateError.message);
+          }
+        } catch (reassignError) {
+          console.warn(`⚠️ Background reassignment failed:`, reassignError.message);
         }
-      } catch (associateError) {
-        console.warn(`⚠️ Failed to associate other tasks:`, associateError.message);
-      }
+      });
     } catch (reassignError) {
-      console.warn(`⚠️ Failed to reassign task:`, reassignError.message);
+      console.warn(`⚠️ Failed to update task associations:`, reassignError.message);
     }
     
     res.status(200).json({
