@@ -781,6 +781,56 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
   }
 };
 
+/**
+ * Notify a helper of available jobs after task association completes
+ * This solves the race condition where helper goes online and socket joins job search
+ * before backend task association completes
+ */
+const notifyHelperOfAvailableJobs = async (helperId) => {
+  try {
+    console.log(`📢 [SOCKET] Notifying helper ${helperId} of available jobs after association...`);
+    
+    // Find the helper's socket
+    const socketId = connectedUsers.get(helperId);
+    if (!socketId) {
+      console.log(`⚠️ [SOCKET] Helper ${helperId} not connected, cannot notify`);
+      return;
+    }
+
+    const socket = io.sockets.sockets.get(socketId);
+    if (!socket) {
+      console.log(`⚠️ [SOCKET] Socket ${socketId} not found for helper ${helperId}`);
+      return;
+    }
+
+    // Get available tasks for this helper using the controller
+    const helperTaskController = require("../controllers/taskController/helperTaskController");
+    const mockReq = { user: { id: helperId, userType: 'helper' } };
+    const mockRes = {
+      status: (code) => ({
+        json: (data) => {
+          if (data.success && data.data) {
+            const jobs = data.data;
+            socket.emit("availableJobs", {
+              jobs: jobs,
+              count: jobs.length,
+              message: jobs.length > 0 ? `Found ${jobs.length} jobs nearby` : "No jobs available right now"
+            });
+            console.log(`✅ [SOCKET] Sent ${jobs.length} available jobs to helper ${helperId} after association`);
+          } else {
+            console.log(`ℹ️ [SOCKET] No jobs available for helper ${helperId} after association`);
+          }
+        }
+      })
+    };
+
+    // Call getAvailableTasks to fetch jobs
+    await helperTaskController.getAvailableTasks(mockReq, mockRes);
+  } catch (error) {
+    console.error(`❌ [SOCKET] Error notifying helper ${helperId} of available jobs:`, error);
+  }
+};
+
 module.exports = {
   initSocketServer,
   getIO,
@@ -791,4 +841,5 @@ module.exports = {
   broadcastNearbyHelpersUpdate,
   broadcastHelperStatusChange,
   broadcastNewJobToSearchingHelpers,
+  notifyHelperOfAvailableJobs,
 };

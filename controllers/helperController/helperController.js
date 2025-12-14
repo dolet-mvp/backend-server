@@ -514,6 +514,10 @@ const toggleAvailability = async (req, res) => {
               
               console.log(`✅ Helper ${helper.id} associated with nearest task ${taskId} (${nearestTask.distance.toFixed(2)}km)`);
               console.log(`⏱️ [PERF] TOTAL TIME: ${Date.now() - startTime}ms`);
+              
+              // Notify helper via socket that jobs are now available (after association completes)
+              const socketService = require("../../services/socketService");
+              socketService.notifyHelperOfAvailableJobs(helper.id);
             } else {
               console.log(`⚠️ No tasks found within 50km for helper ${helper.id} (after filtering acted tasks)`);
               console.log(`⏱️ [PERF] TOTAL TIME: ${Date.now() - startTime}ms`);
