@@ -58,11 +58,21 @@ const sendToDevice = async (token, notification, data = {}) => {
   }
 
   try {
+    // Support both notification.body and notification.message formats
+    const notificationBody = notification.body || notification.message;
+    
+    if (!notificationBody || !notification.title) {
+      console.error('❌ Invalid notification format:', { title: notification.title, body: notificationBody });
+      return { success: false, error: "Missing title or body in notification" };
+    }
+    
+    console.log(`📤 [PUSH] Sending to token: ${token.substring(0, 20)}... | Title: ${notification.title}`);
+    
     const message = {
       token,
       notification: {
         title: notification.title,
-        body: notification.message,
+        body: notificationBody,
       },
       data: {
         ...data,
@@ -127,6 +137,8 @@ const sendToUser = async (userId, userType, notification, data = {}) => {
   }
 
   try {
+    console.log(`🔍 [PUSH] Sending to ${userType} ${userId} | Title: ${notification.title || notification.message}`);
+    
     // Get all active device tokens for the user
     const whereClause = { isActive: true, userType };
     if (userType === "helper") {
@@ -135,12 +147,16 @@ const sendToUser = async (userId, userType, notification, data = {}) => {
       whereClause.helpseekerId = userId;
     }
 
+    console.log(`🔍 [PUSH] Query where:`, JSON.stringify(whereClause));
+    
     const deviceTokens = await DeviceToken.findAll({
       where: whereClause,
     });
 
+    console.log(`📱 [PUSH] Found ${deviceTokens.length} device token(s) for ${userType} ${userId}`);
+    
     if (deviceTokens.length === 0) {
-      console.log(`ℹ️  No active device tokens found for user ${userId}`);
+      console.log(`⚠️ [PUSH] No active device tokens found for user ${userId}`);
       return { success: true, message: "No devices to send to" };
     }
 
