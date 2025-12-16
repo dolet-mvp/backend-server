@@ -305,7 +305,15 @@ const completeWork = async (req, res) => {
               
               console.log(`🔍 [AUTO-ASSIGN] Found ${eligibleTasks.length} eligible pending tasks`);
               
-              if (eligibleTasks.length > 0 && helperAddress) {
+              if (eligibleTasks.length > 0) {
+                // Get helper's address from the helper object
+                const helperAddress = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
+                
+                if (!helperAddress || !helperAddress.latitude || !helperAddress.longitude) {
+                  console.log(`⚠️ [AUTO-ASSIGN] Helper ${helper.id} has no valid address`);
+                  return;
+                }
+                
                 // Calculate distances to find nearest task
                 const axios = require('axios');
                 const apiKey = process.env.GOOGLE_MAPS_API_KEY;
