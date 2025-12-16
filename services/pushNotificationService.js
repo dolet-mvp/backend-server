@@ -68,6 +68,12 @@ const sendToDevice = async (token, notification, data = {}) => {
     
     console.log(`📤 [PUSH] Sending to token: ${token.substring(0, 20)}... | Title: ${notification.title}`);
     
+    // Convert all data values to strings (Firebase requirement)
+    const stringifiedData = {};
+    for (const [key, value] of Object.entries(data)) {
+      stringifiedData[key] = String(value);
+    }
+    
     const message = {
       token,
       notification: {
@@ -75,10 +81,10 @@ const sendToDevice = async (token, notification, data = {}) => {
         body: notificationBody,
       },
       data: {
-        ...data,
-        notificationId: data.notificationId || "",
-        type: data.type || "general",
-        priority: data.priority || "medium",
+        ...stringifiedData,
+        notificationId: stringifiedData.notificationId || "",
+        type: stringifiedData.type || "general",
+        priority: stringifiedData.priority || "medium",
       },
       android: {
         priority: data.priority === "high" ? "high" : "normal",
