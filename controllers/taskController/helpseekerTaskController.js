@@ -12,6 +12,7 @@ const { createNotification } = require("../../services/notificationService");
 const { getCachedDistance, batchCacheDistances } = require("../../services/distanceCacheService");
 const { sequelize } = require("../../dbConnection/dbConfig");
 const { Transaction } = require("sequelize");
+const { sendToUser } = require("../../services/pushNotificationService");
 
 
 const generateOTP = () => {
@@ -462,6 +463,26 @@ const publishTask = async (req, res) => {
                     await socketService.broadcastNewJobToSearchingHelpers(jobData);
                   } catch (socketError) {
                     console.error(`⚠️ [PUBLISH] Failed to broadcast job via socket:`, socketError.message);
+                  }
+                  
+                  // Send push notification to the associated helper
+                  try {
+                    await sendToUser(
+                      closestHelper.helperId,
+                      'helper',
+                      {
+                        title: "New Task Available Near You!",
+                        body: `${task.title} - ₹${task.budget} (${closestHelper.distance.toFixed(2)}km away)`,
+                      },
+                      {
+                        type: "task_available",
+                        taskId: task.id.toString(),
+                        distance: closestHelper.distance.toString(),
+                      }
+                    );
+                    console.log(`📲 [PUBLISH] Push notification sent to helper ${closestHelper.helperId}`);
+                  } catch (pushError) {
+                    console.error(`⚠️ [PUBLISH] Failed to send push notification:`, pushError.message);
                   }
                 }
               }
