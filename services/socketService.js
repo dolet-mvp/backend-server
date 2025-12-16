@@ -615,15 +615,19 @@ const broadcastHelperStatusChange = async (helperId, status, helperData) => {
   try {
     const io = getIO();
     
-    // Notify all helpseekers who might be interested
-    io.emit("helperStatusChanged", {
+    const payload = {
       helperId,
       status,
       timestamp: new Date().toISOString(),
       ...helperData,
-    });
+    };
+    
+    // Notify all helpseekers who might be interested
+    io.emit("helperStatusChanged", payload);
     
     console.log(`📡 [SOCKET SERVER] Broadcasted helper ${helperId} status: ${status}`);
+    console.log(`📦 [SOCKET SERVER] Payload:`, JSON.stringify(payload, null, 2));
+    console.log(`👥 [SOCKET SERVER] Connected clients: ${io.engine.clientsCount}`);
   } catch (error) {
     console.error("❌ [SOCKET SERVER] Error broadcasting helper status:", error);
   }
