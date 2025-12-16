@@ -253,6 +253,148 @@ const completeWork = async (req, res) => {
         });
         
         console.log(`✅ Helper ${helper.id} automatically set to available after task completion`);
+        
+        // AUTO-ASSOCIATE: Find and assign next nearest pending task to this helper
+        setImmediate(async () => {
+          try {
+            console.log(`\n🔍 [AUTO-ASSIGN] Looking for next pending task for helper ${helper.id}...`);
+            
+            const taskIds = await redis.zrange('jobs:published', 0, -1);
+            console.log(`🔍 [AUTO-ASSIGN] Found ${taskIds.length} published tasks`);
+            
+            if (taskIds.length > 0) {
+              const tasksData = await Promise.all(taskIds.map(id => redis.get(`job:${id}`)));
+              const eligibleTasks = [];
+              
+              for (const taskData of tasksData) {
+                if (!taskData) continue;
+                
+                const pendingTask = typeof taskData === 'string' ? JSON.parse(taskData) : taskData;
+                const pendingTaskId = pendingTask.taskId || pendingTask.id;
+                
+                // Check if task already has associated helpers
+                const taskHelpersData = await redis.get(`task:${pendingTaskId}:associated_helpers`);
+                if (taskHelpersData) {
+                  const associatedHelpers = typeof taskHelpersData === 'string' ? JSON.parse(taskHelpersData) : taskHelpersData;
+                  if (Array.isArray(associatedHelpers) && associatedHelpers.length > 0) {
+                    console.log(`   ⏭️ Task ${pendingTaskId} already has associated helpers, skipping`);
+                    continue;
+                  }
+                }
+                
+                // Check if helper already acted on this task
+                const actionsData = await redis.get(`task:${pendingTaskId}:actions`);
+                if (actionsData) {
+                  const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
+                  if (actions.some(action => action.helperId === helper.id)) {
+                    console.log(`   ⏭️ Helper already acted on task ${pendingTaskId}, skipping`);
+                    continue;
+                  }
+                }
+                
+                // Add to eligible tasks if has location
+                const taskLocation = pendingTask.location || (pendingTask.steps && pendingTask.steps[0] ? pendingTask.steps[0].location : null);
+                if (taskLocation && taskLocation.lat && taskLocation.lng) {
+                  eligibleTasks.push({
+                    taskId: pendingTaskId,
+                    location: taskLocation,
+                    taskData: pendingTask
+                  });
+                }
+              }
+              
+              console.log(`🔍 [AUTO-ASSIGN] Found ${eligibleTasks.length} eligible pending tasks`);
+              
+              if (eligibleTasks.length > 0 && helperAddress) {
+                // Calculate distances to find nearest task
+                const axios = require('axios');
+                const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+                const tasksWithDistance = [];
+                
+                if (apiKey) {
+                  const batchSize = 25;
+                  for (let i = 0; i < eligibleTasks.length; i += batchSize) {
+                    const batch = eligibleTasks.slice(i, i + batchSize);
+                    const destinationsStr = batch.map(t => `${t.location.lat},${t.location.lng}`).join('|');
+                    
+                    try {
+                      const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
+                        params: {
+                          origins: `${helperAddress.latitude},${helperAddress.longitude}`,
+                          destinations: destinationsStr,
+                          key: apiKey,
+                          units: 'metric',
+                        },
+                        timeout: 5000,
+                      });
+                      
+                      if (response.data.status === 'OK' && response.data.rows[0]) {
+                        response.data.rows[0].elements.forEach((element, index) => {
+                          if (element.status === 'OK') {
+                            const distanceInKm = element.distance.value / 1000;
+                            if (distanceInKm <= 50) {
+                              tasksWithDistance.push({
+                                taskId: batch[index].taskId,
+                                taskData: batch[index].taskData,
+                                distance: distanceInKm
+                              });
+                            }
+                          }
+                        });
+                      }
+                    } catch (error) {
+                      console.warn(`⚠️ [AUTO-ASSIGN] Distance calculation failed:`, error.message);
+                    }
+                  }
+                }
+                
+                if (tasksWithDistance.length > 0) {
+                  // Sort by distance and get nearest
+                  tasksWithDistance.sort((a, b) => a.distance - b.distance);
+                  const nearestTask = tasksWithDistance[0];
+                  
+                  // Associate helper with nearest pending task
+                  await redis.setex(
+                    `task:${nearestTask.taskId}:associated_helpers`,
+                    2592000,
+                    JSON.stringify([helper.id])
+                  );
+                  
+                  await redis.setex(
+                    `helper:${helper.id}:associated_tasks`,
+                    43200,
+                    JSON.stringify([nearestTask.taskId])
+                  );
+                  
+                  console.log(`✅ [AUTO-ASSIGN] Helper ${helper.id} auto-associated with task ${nearestTask.taskId} (${nearestTask.distance.toFixed(2)}km)`);
+                  
+                  // Notify helper via socket and push notification
+                  const socketService = require("../../services/socketService");
+                  socketService.notifyHelperOfAvailableJobs(helper.id);
+                  
+                  // Send push notification
+                  const { sendPushNotification } = require("../../services/pushNotificationService");
+                  await sendPushNotification({
+                    userId: helper.id,
+                    userType: 'helper',
+                    title: "New Job Available",
+                    message: `New job nearby: ${nearestTask.taskData.title}`,
+                    data: {
+                      type: "new_job_available",
+                      taskId: nearestTask.taskId,
+                    },
+                  });
+                } else {
+                  console.log(`ℹ️ [AUTO-ASSIGN] No pending tasks within 50km for helper ${helper.id}`);
+                }
+              }
+            } else {
+              console.log(`ℹ️ [AUTO-ASSIGN] No published tasks available`);
+            }
+          } catch (autoAssignError) {
+            console.error(`❌ [AUTO-ASSIGN] Error:`, autoAssignError.message);
+          }
+        });
       }
     } catch (helperUpdateError) {
       console.warn(`⚠️ Failed to update helper availability:`, helperUpdateError.message);

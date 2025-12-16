@@ -291,6 +291,18 @@ const publishTask = async (req, res) => {
                 if (actionsData) {
                   const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
                   if (actions.some(action => action.helperId === helperId)) {
+                    console.log(`   ⏭️ Helper ${helperId} already acted on task, skipping`);
+                    continue;
+                  }
+                }
+                
+                // CHECK: Skip if helper already has associated tasks (busy with another job)
+                const helperTasksKey = `helper:${helperId}:associated_tasks`;
+                const helperTasksData = await redis.get(helperTasksKey);
+                if (helperTasksData) {
+                  const existingTasks = typeof helperTasksData === 'string' ? JSON.parse(helperTasksData) : helperTasksData;
+                  if (Array.isArray(existingTasks) && existingTasks.length > 0) {
+                    console.log(`   ⏭️ Helper ${helperId} already has ${existingTasks.length} associated task(s), skipping`);
                     continue;
                   }
                 }

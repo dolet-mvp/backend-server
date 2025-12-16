@@ -44,13 +44,35 @@ const findAndAssociateNearestHelper = async (taskId, taskLocation, excludeHelper
       return null;
     }
     
-    console.log(`   Found ${validHelpers.length} available helper(s)`);
+    // CHECK: Filter out helpers who already have associated tasks (busy)
+    const availableHelpers = [];
+    for (const helper of validHelpers) {
+      const helperTasksKey = `helper:${helper.id}:associated_tasks`;
+      const existingTasksData = await redis.get(helperTasksKey);
+      
+      if (existingTasksData) {
+        const existingTasks = typeof existingTasksData === 'string' ? JSON.parse(existingTasksData) : existingTasksData;
+        if (Array.isArray(existingTasks) && existingTasks.length > 0) {
+          console.log(`   ⏭️ Helper ${helper.id} already has ${existingTasks.length} associated task(s), skipping`);
+          continue;
+        }
+      }
+      
+      availableHelpers.push(helper);
+    }
+    
+    if (availableHelpers.length === 0) {
+      console.log('   ⚠️ All online helpers are busy with other tasks');
+      return null;
+    }
+    
+    console.log(`   Found ${availableHelpers.length} available helper(s) (not busy)`);
     
     // Calculate distances using Google Maps API
     const helperLocations = [];
     const helperIds = [];
     
-    for (const helper of validHelpers) {
+    for (const helper of availableHelpers) {
       const address = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
       if (address && address.latitude && address.longitude) {
         helperLocations.push({ lat: parseFloat(address.latitude), lng: parseFloat(address.longitude) });
@@ -292,6 +314,17 @@ const toggleAvailability = async (req, res) => {
           const axios = require("axios");
           
           console.log(`⏱️ [PERF] Starting task association for helper ${helper.id}`);
+          
+          // CHECK: Skip if helper already has associated tasks (already busy)
+          const helperTasksKey = `helper:${helper.id}:associated_tasks`;
+          const existingTasksData = await redis.get(helperTasksKey);
+          if (existingTasksData) {
+            const existingTasks = typeof existingTasksData === 'string' ? JSON.parse(existingTasksData) : existingTasksData;
+            if (Array.isArray(existingTasks) && existingTasks.length > 0) {
+              console.log(`⏭️ [PERF] Helper ${helper.id} already has ${existingTasks.length} associated task(s), skipping new association`);
+              return;
+            }
+          }
           
           // PERFORMANCE FIX: Use sorted set instead of keys()
           const taskIds = await redis.zrange('jobs:published', 0, -1);
