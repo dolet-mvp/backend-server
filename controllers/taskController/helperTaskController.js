@@ -11,6 +11,7 @@ const { sequelize } = require("../../dbConnection/dbConfig");
 const { findAndAssociateNearestHelper } = require("../helperController/helperController");
 const { getGoogleMapsDistances } = require("./helpseekerTaskController");
 const { getCachedDistance, batchCacheDistances } = require("../../services/distanceCacheService");
+const { sendToUser } = require("../../services/pushNotificationService");
 
 // Generate 6-digit OTP
 const generateOTP = () => {
@@ -825,6 +826,35 @@ const acceptTask = async (req, res) => {
         priority: "high",
       })
     ]).catch(err => console.error('⚠️ Failed to create notifications:', err));
+
+    // Send push notifications to both helper and helpseeker
+    Promise.all([
+      sendToUser(
+        task.helpseekerId,
+        'helpseeker',
+        {
+          title: "Task Accepted by Helper",
+          body: `${helper.fullName} has accepted your task "${task.title}". OTP: ${otp}`,
+        },
+        {
+          type: "task_assigned",
+          taskId: task.id.toString(),
+          otp: otp,
+        }
+      ).catch(err => console.error('⚠️ Failed to send push notification to helpseeker:', err)),
+      sendToUser(
+        helperId,
+        'helper',
+        {
+          title: "Task Assigned Successfully",
+          body: `You have accepted "${task.title}". Wait for helpseeker to share the OTP.`,
+        },
+        {
+          type: "task_assigned",
+          taskId: task.id.toString(),
+        }
+      ).catch(err => console.error('⚠️ Failed to send push notification to helper:', err))
+    ]);
 
     res.status(200).json({
       success: true,

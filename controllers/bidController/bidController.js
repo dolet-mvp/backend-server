@@ -4,6 +4,7 @@ const TaskQueue = require("../../models/queueModel/queueModel");
 const Notification = require("../../models/notificationModel/notificationModel");
 const Helper = require("../../models/authModel/helperModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
+const { sendToUser } = require("../../services/pushNotificationService");
 
 // Helper function to parse date from multiple formats
 const parseDate = (dateString) => {
@@ -317,6 +318,35 @@ const acceptBid = async (req, res) => {
       type: "bid_accepted",
       priority: "high",
     });
+
+    // Send push notifications to both helper and helpseeker
+    Promise.all([
+      sendToUser(
+        bid.helperId,
+        'helper',
+        {
+          title: "Task Assigned - Bid Accepted! 🎉",
+          body: `Your bid of ₹${bid.bidAmount} for "${bid.task.title}" has been accepted. Ask for the OTP to start.`,
+        },
+        {
+          type: "bid_accepted",
+          taskId: bid.taskId.toString(),
+        }
+      ).catch(err => console.error('⚠️ Failed to send push notification to helper:', err)),
+      sendToUser(
+        helpseekerId,
+        'helpseeker',
+        {
+          title: "Bid Accepted",
+          body: `You accepted ${bid.helper.fullName}'s bid. OTP: ${otp}`,
+        },
+        {
+          type: "bid_accepted",
+          taskId: bid.taskId.toString(),
+          otp: otp,
+        }
+      ).catch(err => console.error('⚠️ Failed to send push notification to helpseeker:', err))
+    ]);
 
     // Notify rejected bidders
     const rejectedBids = await Bid.findAll({
