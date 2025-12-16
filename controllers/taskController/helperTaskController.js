@@ -1116,14 +1116,16 @@ const rejectTask = async (req, res) => {
                         const socketService = require("../../services/socketService");
                         socketService.notifyHelperOfAvailableJobs(helperId);
                         
-                        const { sendPushNotification } = require("../../services/pushNotificationService");
-                        await sendPushNotification({
-                          userId: helperId,
-                          userType: 'helper',
-                          title: "New Job Available",
-                          message: `New job nearby: ${nearestTask.taskData.title}`,
-                          data: { type: "new_job_available", taskId: nearestTask.taskId },
-                        });
+                        const { sendToUser } = require("../../services/pushNotificationService");
+                        await sendToUser(
+                          helperId,
+                          'helper',
+                          {
+                            title: "New Job Available",
+                            body: `New job nearby: ${nearestTask.taskData.title}`,
+                          },
+                          { type: "new_job_available", taskId: nearestTask.taskId }
+                        );
                       } else {
                         console.log(`ℹ️ [AUTO-ASSIGN] No pending tasks within 50km`);
                       }
@@ -1700,14 +1702,16 @@ const passTask = async (req, res) => {
                         const socketService = require("../../services/socketService");
                         socketService.notifyHelperOfAvailableJobs(helperId);
                         
-                        const { sendPushNotification } = require("../../services/pushNotificationService");
-                        await sendPushNotification({
-                          userId: helperId,
-                          userType: 'helper',
-                          title: "New Job Available",
-                          message: `New job nearby: ${nearestTask.taskData.title}`,
-                          data: { type: "new_job_available", taskId: nearestTask.taskId },
-                        });
+                        const { sendToUser } = require("../../services/pushNotificationService");
+                        await sendToUser(
+                          helperId,
+                          'helper',
+                          {
+                            title: "New Job Available",
+                            body: `New job nearby: ${nearestTask.taskData.title}`,
+                          },
+                          { type: "new_job_available", taskId: nearestTask.taskId }
+                        );
                       } else {
                         console.log(`ℹ️ [AUTO-ASSIGN] No pending tasks within 50km`);
                       }

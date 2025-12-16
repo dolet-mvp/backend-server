@@ -381,17 +381,19 @@ const completeWork = async (req, res) => {
                   socketService.notifyHelperOfAvailableJobs(helper.id);
                   
                   // Send push notification
-                  const { sendPushNotification } = require("../../services/pushNotificationService");
-                  await sendPushNotification({
-                    userId: helper.id,
-                    userType: 'helper',
-                    title: "New Job Available",
-                    message: `New job nearby: ${nearestTask.taskData.title}`,
-                    data: {
+                  const { sendToUser } = require("../../services/pushNotificationService");
+                  await sendToUser(
+                    helper.id,
+                    'helper',
+                    {
+                      title: "New Job Available",
+                      body: `New job nearby: ${nearestTask.taskData.title}`,
+                    },
+                    {
                       type: "new_job_available",
                       taskId: nearestTask.taskId,
-                    },
-                  });
+                    }
+                  );
                 } else {
                   console.log(`ℹ️ [AUTO-ASSIGN] No pending tasks within 50km for helper ${helper.id}`);
                 }
