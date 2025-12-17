@@ -755,16 +755,29 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
     console.log(`🔍 [SOCKET BROADCAST] Checking ${sockets.size} connected sockets for task ${taskId}`);
     
     for (const [socketId, socket] of sockets) {
-      // Only process helpers in job search
+      // Get helper info from socket connection or job search data
+      const userInfo = Array.from(connectedUsers.entries()).find(
+        ([sid, user]) => sid === socketId && user.userType === 'helper'
+      );
+      
+      const helperId = socket.jobSearchData?.helperId || userInfo?.[1]?.userId;
+      const latitude = socket.jobSearchData?.latitude;
+      const longitude = socket.jobSearchData?.longitude;
+      const radius = socket.jobSearchData?.radius || 50; // Default 50km if not in search
+      
+      // Skip if not a helper
+      if (!helperId) continue;
+      
       if (socket.jobSearchData) {
         helpersInSearch++;
-        const { helperId, latitude, longitude, radius } = socket.jobSearchData;
-        console.log(`👤 [SOCKET BROADCAST] Checking helper ${helperId} - Socket: ${socketId}`);
+      }
+      
+      console.log(`👤 [SOCKET BROADCAST] Checking helper ${helperId} - Socket: ${socketId} (In search: ${!!socket.jobSearchData})`);
 
-        try {
-          // Check if helper is in associated tasks list
-          const helperTasksKey = `helper:${helperId}:associated_tasks`;
-          const associatedTasksData = await redis.get(helperTasksKey);
+      try {
+        // Check if helper is in associated tasks list
+        const helperTasksKey = `helper:${helperId}:associated_tasks`;
+        const associatedTasksData = await redis.get(helperTasksKey);
           
           let associatedTaskIds = [];
           if (associatedTasksData) {
@@ -781,7 +794,23 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
             eligibleHelpers++;
             console.log(`✅ [SOCKET BROADCAST] Helper ${helperId} is eligible for task ${taskId}`);
             
-            // Calculate distance
+            // If helper not in search (no location), send basic notification
+            if (!latitude || !longitude) {
+              const jobPayload = {
+                ...taskData,
+                distance: null,
+                distanceText: 'N/A',
+                durationText: 'N/A',
+              };
+              
+              console.log(`📤 [SOCKET BROADCAST] Emitting basic notification to helper ${helperId} (not in search)`);
+              socket.emit("newJobAvailable", jobPayload);
+              broadcastCount++;
+              console.log(`📤 [SOCKET BROADCAST] ✅ Sent new job ${taskId} to helper ${helperId} (no distance calc)`);
+              continue;
+            }
+            
+            // Calculate distance for helpers in search mode
             const distance = calculateDistance(latitude, longitude, taskLat, taskLng);
             console.log(`📏 [SOCKET BROADCAST] Distance: ${distance.toFixed(2)}km (max: ${radius}km)`);
 
@@ -837,9 +866,8 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
           } else {
             console.log(`⚠️ [SOCKET BROADCAST] Task ${taskId} not in helper ${helperId}'s associated tasks`);
           }
-        } catch (error) {
-          console.error(`❌ [SOCKET BROADCAST] Error processing helper ${helperId}:`, error.message);
-        }
+      } catch (error) {
+        console.error(`❌ [SOCKET BROADCAST] Error processing helper ${helperId}:`, error.message);
       }
     }
 
