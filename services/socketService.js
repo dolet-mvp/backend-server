@@ -485,10 +485,16 @@ const initSocketServer = (server) => {
         
         if (!recipientInChat) {
           // Recipient is not in chat, send push notification
-          console.log(`📱 [SOCKET SERVER] Recipient NOT in chat, sending push notification to ${recipientType} ${recipientId}`);
+          console.log(`📱 [SOCKET SERVER] Sending push notification:`);
+          console.log(`   Recipient: ${recipientType} ${recipientId}`);
+          console.log(`   Sender: ${userType} ${userId}`);
+          console.log(`   Task: ${taskId}`);
           
           const { sendToUser } = require("./pushNotificationService");
           const senderName = messageWithDetails[senderAlias]?.fullName || 'Someone';
+          
+          console.log(`   Sender name: ${senderName}`);
+          console.log(`   Message preview: ${message.substring(0, 50)}...`);
           
           sendToUser(
             recipientId,
@@ -505,7 +511,11 @@ const initSocketServer = (server) => {
               senderType: userType,
               openChat: 'true',
             }
-          ).catch(err => console.error('⚠️ Failed to send push notification for message:', err));
+          ).then(() => {
+            console.log(`✅ [SOCKET SERVER] Push notification sent successfully to ${recipientType} ${recipientId}`);
+          }).catch(err => {
+            console.error(`❌ [SOCKET SERVER] Failed to send push notification to ${recipientType} ${recipientId}:`, err.message);
+          });
         } else {
           console.log(`ℹ️ [SOCKET SERVER] Recipient IS in chat room, skipping push notification`);
         }
