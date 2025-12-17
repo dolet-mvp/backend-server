@@ -231,6 +231,9 @@ const publishTask = async (req, res) => {
 
     // Store the published job in Redis
     try {
+      // Use main location or first step location for job data
+      const jobLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+      
       const jobData = {
         taskId: task.id,
         helpseekerId: helpseekerId,
@@ -241,7 +244,7 @@ const publishTask = async (req, res) => {
         estimatedDuration: task.estimatedDuration,
         priority: task.priority,
         locationRequired: task.locationRequired,
-        location: task.location,
+        location: jobLocation, // Use combined location
         status: task.status,
         queuePosition: queueEntry.queuePosition,
         steps : task.steps,
@@ -262,8 +265,18 @@ const publishTask = async (req, res) => {
       console.log(`⏱️ [PUBLISH] Redis writes completed in ${Date.now() - redisStart}ms`);
       console.log(`⏱️ [PUBLISH] Starting helper association (non-blocking) at ${Date.now() - publishStartTime}ms from start`);
 
+      // Check if task has location (either main location or first step location)
+      const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+      const hasValidLocation = taskLocation && taskLocation.lat && taskLocation.lng;
+      
+      console.log(`📍 [PUBLISH] Task location check:`, {
+        hasMainLocation: !!(task.location && task.location.lat && task.location.lng),
+        hasStepLocation: !!(task.steps && task.steps[0] && task.steps[0].location),
+        willBroadcast: hasValidLocation,
+      });
+
       // Associate newly published task with online helpers FIRST, then broadcast
-      if (task.location && task.location.lat && task.location.lng) {
+      if (hasValidLocation) {
         setImmediate(async () => {
           try {
             const startTime = Date.now();
