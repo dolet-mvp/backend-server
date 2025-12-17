@@ -890,18 +890,24 @@ const notifyHelperOfAvailableJobs = async (helperId) => {
   try {
     console.log(`📢 [SOCKET] Notifying helper ${helperId} of available jobs after association...`);
     
-    // Find the helper's socket
-    const socketId = connectedUsers.get(helperId);
-    if (!socketId) {
+    // Find the helper's socket ID from connectedUsers Map
+    const helperSocketEntry = Array.from(connectedUsers.entries()).find(
+      ([socketId, user]) => user.userId === helperId && user.userType === 'helper'
+    );
+    
+    if (!helperSocketEntry) {
       console.log(`⚠️ [SOCKET] Helper ${helperId} not connected, cannot notify`);
       return;
     }
-
+    
+    const socketId = helperSocketEntry[0];
     const socket = io.sockets.sockets.get(socketId);
     if (!socket) {
       console.log(`⚠️ [SOCKET] Socket ${socketId} not found for helper ${helperId}`);
       return;
     }
+    
+    console.log(`✅ [SOCKET] Found socket ${socketId} for helper ${helperId}`);
 
     // Get available tasks for this helper using the controller
     const helperTaskController = require("../controllers/taskController/helperTaskController");
