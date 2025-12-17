@@ -431,27 +431,30 @@ const initSocketServer = (server) => {
         // Remove the original aliased property
         delete messageToSend[senderAlias];
 
-        // Broadcast to task chat room
+        // Broadcast to task chat room (EXCLUDING sender to prevent duplicates)
         const roomName = `task:${taskId}:chat`;
         const socketsInRoom = io.sockets.adapter.rooms.get(roomName);
         const clientCount = socketsInRoom ? socketsInRoom.size : 0;
         
         console.log(`📡 [SOCKET SERVER] Broadcasting to room ${roomName} with ${clientCount} clients`);
         
-        io.to(roomName).emit("newTaskMessage", {
+        // Use socket.to() instead of io.to() to exclude the sender
+        socket.to(roomName).emit("newTaskMessage", {
           taskId,
           message: messageToSend,
         });
 
-        // Send delivery confirmation to sender
+        // Send delivery confirmation to sender with full message details
         socket.emit("messageSent", {
           taskId,
           messageId: taskMessage.id,
           tempId: tempId,
+          message: messageToSend,
           status: "sent",
         });
 
-        console.log(`✅ [SOCKET SERVER] Message broadcasted to room: ${roomName}`);
+        console.log(`✅ [SOCKET SERVER] Message sent to others in room: ${roomName}`);
+        console.log(`✅ [SOCKET SERVER] Confirmation sent back to sender with tempId: ${tempId}`);
 
         // Send push notification to the recipient (only if not in chat)
         const recipientId = userType === 'helper' ? task.helpseekerId : task.assignedHelperId;
