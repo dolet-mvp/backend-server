@@ -1403,23 +1403,40 @@ const cancelTask = async (req, res) => {
       // Emit socket event to all associated helpers
       const io = socketService.getIO();
       
+      console.log(`🔍 [CANCEL TASK] Connected users map size: ${socketService.connectedUsers.size}`);
+      console.log(`🔍 [CANCEL TASK] All connected users:`, 
+        Array.from(socketService.connectedUsers.entries()).map(([sid, user]) => ({
+          socketId: sid,
+          userId: user.userId,
+          userType: user.userType
+        }))
+      );
+      
       for (const helperId of associatedHelperIds) {
+        console.log(`🔍 [CANCEL TASK] Looking for helper ${helperId} in connected users...`);
+        
         // Find helper's socket
         const helperSocketEntry = Array.from(socketService.connectedUsers.entries()).find(
           ([socketId, user]) => user.userId === helperId && user.userType === 'helper'
         );
         
         if (helperSocketEntry) {
+          console.log(`✅ [CANCEL TASK] Found helper ${helperId} in connectedUsers with socketId: ${helperSocketEntry[0]}`);
           const socketId = helperSocketEntry[0];
           const socket = io.sockets.sockets.get(socketId);
           if (socket) {
+            console.log(`✅ [CANCEL TASK] Socket object found for ${helperId}, emitting taskCancelled event...`);
             socket.emit('taskCancelled', {
               taskId: taskId,
               title: task.title,
               reason: 'cancelled_by_helpseeker',
             });
-            console.log(`📤 [CANCEL TASK] Notified helper ${helperId} via socket about task cancellation`);
+            console.log(`📤 [CANCEL TASK] Successfully emitted taskCancelled to helper ${helperId}`);
+          } else {
+            console.log(`❌ [CANCEL TASK] Socket object NOT found in io.sockets.sockets for socketId: ${socketId}`);
           }
+        } else {
+          console.log(`⚠️ [CANCEL TASK] Helper ${helperId} not found in connectedUsers map - they may be offline or disconnected`);
         }
       }
       
