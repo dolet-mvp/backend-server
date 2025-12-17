@@ -127,8 +127,8 @@ const initSocketServer = (server) => {
     console.log(`📊 [SOCKET SERVER] Transport: ${socket.conn.transport.name}`);
     console.log(`🌐 [SOCKET SERVER] Client address: ${socket.handshake.address}`);
 
-    // Store user connection
-    connectedUsers.set(userId, socket.id);
+    // Store user connection with userType
+    connectedUsers.set(socket.id, { userId, userType, socketId: socket.id });
     console.log(`📝 [SOCKET SERVER] Total connected users: ${connectedUsers.size}`);
 
     // Join user to their personal room
@@ -585,8 +585,9 @@ const initSocketServer = (server) => {
 
     // Handle disconnection
     socket.on("disconnect", () => {
-      console.log(`❌ User disconnected: ${userId} - Socket: ${socket.id}`);
-      connectedUsers.delete(userId);
+      console.log(`❌ User disconnected: ${userId} (${userType}) - Socket: ${socket.id}`);
+      connectedUsers.delete(socket.id);
+      console.log(`📝 [SOCKET SERVER] Remaining connected users: ${connectedUsers.size}`);
     });
 
     // Handle errors
