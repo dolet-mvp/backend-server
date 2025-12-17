@@ -1462,8 +1462,16 @@ const increaseReward = async (req, res) => {
     console.log(`✅ [REWARD INCREASE] Updated Redis job data with new budget`);
 
     // Re-run helper association logic (same as publish) in background
-    if (task.location && task.location.lat && task.location.lng) {
+    const taskLocationForReward = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+    const hasValidLocation = taskLocationForReward && taskLocationForReward.lat && taskLocationForReward.lng;
+    
+    if (hasValidLocation) {
       console.log(`🔄 [REWARD INCREASE] Starting fresh helper association for task ${taskId}`);
+      
+      // Capture location in closure
+      const taskLat = taskLocationForReward.lat;
+      const taskLng = taskLocationForReward.lng;
+      
       setImmediate(async () => {
         try {
           const startTime = Date.now();
@@ -1509,8 +1517,8 @@ const increaseReward = async (req, res) => {
                   const cached = await getCachedDistance(
                     helper.latitude,
                     helper.longitude,
-                    task.location.lat,
-                    task.location.lng
+                    taskLat,
+                    taskLng
                   );
                   
                   if (cached && cached.distanceInMeters) {
@@ -1551,7 +1559,7 @@ const increaseReward = async (req, res) => {
                       const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
                         params: {
                           origins: originsStr,
-                          destinations: `${task.location.lat},${task.location.lng}`,
+                          destinations: `${taskLat},${taskLng}`,
                           key: apiKey,
                           units: 'metric',
                         },
@@ -1568,8 +1576,8 @@ const increaseReward = async (req, res) => {
                             distancesToCache.push({
                               originLat: batch[index].latitude,
                               originLng: batch[index].longitude,
-                              destLat: task.location.lat,
-                              destLng: task.location.lng,
+                              destLat: taskLat,
+                              destLng: taskLng,
                               distanceData: {
                                 distanceInMeters: row.elements[0].distance.value,
                                 durationInSeconds: row.elements[0].duration.value,
@@ -1633,6 +1641,31 @@ const increaseReward = async (req, res) => {
                   console.log(`📡 [REWARD INCREASE] Broadcasted updated job to helpers`);
                 } catch (socketError) {
                   console.error(`⚠️ [REWARD INCREASE] Failed to broadcast job:`, socketError.message);
+                }
+                
+                // Also notify the associated helper specifically about reward increase
+                try {
+                  const io = socketService.getIO();
+                  const helperSocketEntry = Array.from(socketService.connectedUsers.entries()).find(
+                    ([socketId, user]) => user.userId === closestHelper.helperId && user.userType === 'helper'
+                  );
+                  
+                  if (helperSocketEntry) {
+                    const socketId = helperSocketEntry[0];
+                    const socket = io.sockets.sockets.get(socketId);
+                    if (socket) {
+                      socket.emit('taskRewardIncreased', {
+                        taskId: task.id,
+                        oldBudget: parseFloat(oldBudget),
+                        newBudget: parseFloat(task.budget),
+                        increase: parseFloat(task.budget) - parseFloat(oldBudget),
+                        title: task.title,
+                      });
+                      console.log(`💰 [REWARD INCREASE] Notified helper ${closestHelper.helperId} via socket about reward increase`);
+                    }
+                  }
+                } catch (notifyError) {
+                  console.error(`⚠️ [REWARD INCREASE] Failed to notify helper via socket:`, notifyError.message);
                 }
               }
             }

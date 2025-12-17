@@ -967,4 +967,5 @@ module.exports = {
   broadcastHelperStatusChange,
   broadcastNewJobToSearchingHelpers,
   notifyHelperOfAvailableJobs,
+  connectedUsers,
 };
