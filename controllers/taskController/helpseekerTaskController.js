@@ -266,17 +266,22 @@ const publishTask = async (req, res) => {
       console.log(`⏱️ [PUBLISH] Starting helper association (non-blocking) at ${Date.now() - publishStartTime}ms from start`);
 
       // Check if task has location (either main location or first step location)
-      const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
-      const hasValidLocation = taskLocation && taskLocation.lat && taskLocation.lng;
+      const taskLocationForBroadcast = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
+      const hasValidLocation = taskLocationForBroadcast && taskLocationForBroadcast.lat && taskLocationForBroadcast.lng;
       
       console.log(`📍 [PUBLISH] Task location check:`, {
         hasMainLocation: !!(task.location && task.location.lat && task.location.lng),
         hasStepLocation: !!(task.steps && task.steps[0] && task.steps[0].location),
-        willBroadcast: hasValidLocation,
+        willBroadcast: !!hasValidLocation,
+        locationSource: task.location ? 'main' : 'step',
       });
 
       // Associate newly published task with online helpers FIRST, then broadcast
       if (hasValidLocation) {
+        // Capture the location in closure before async operation
+        const taskLat = taskLocationForBroadcast.lat;
+        const taskLng = taskLocationForBroadcast.lng;
+        
         setImmediate(async () => {
           try {
             const startTime = Date.now();
@@ -347,8 +352,8 @@ const publishTask = async (req, res) => {
                     const cached = await getCachedDistance(
                       helper.latitude,
                       helper.longitude,
-                      task.location.lat,
-                      task.location.lng
+                      taskLat,
+                      taskLng
                     );
                     
                     if (cached && cached.distanceInMeters) {
@@ -390,7 +395,7 @@ const publishTask = async (req, res) => {
                         const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
                           params: {
                             origins: originsStr,
-                            destinations: `${task.location.lat},${task.location.lng}`,
+                            destinations: `${taskLat},${taskLng}`,
                             key: apiKey,
                             units: 'metric',
                           },
@@ -408,8 +413,8 @@ const publishTask = async (req, res) => {
                               distancesToCache.push({
                                 originLat: batch[index].latitude,
                                 originLng: batch[index].longitude,
-                                destLat: task.location.lat,
-                                destLng: task.location.lng,
+                                destLat: taskLat,
+                                destLng: taskLng,
                                 distanceData: {
                                   distanceInMeters: row.elements[0].distance.value,
                                   durationInSeconds: row.elements[0].duration.value,
