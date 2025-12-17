@@ -453,42 +453,32 @@ const initSocketServer = (server) => {
 
         console.log(`✅ [SOCKET SERVER] Message broadcasted to room: ${roomName}`);
 
-        // Send push notification to the recipient (if not in chat)
+        // Always send push notification to the recipient
+        // They may not be actively viewing the chat even if in the room
         const recipientId = userType === 'helper' ? task.helpseekerId : task.assignedHelperId;
         const recipientType = userType === 'helper' ? 'helpseeker' : 'helper';
         
-        // Check if recipient is in the room (online in chat)
-        const recipientSocket = Array.from(connectedUsers.entries()).find(
-          ([socketId, user]) => user.userId === recipientId
-        );
+        console.log(`📱 [SOCKET SERVER] Sending push notification to ${recipientType} ${recipientId}`);
         
-        const recipientInChat = recipientSocket && socketsInRoom && socketsInRoom.has(recipientSocket[0]);
+        const { sendToUser } = require("./pushNotificationService");
+        const senderName = messageWithDetails[senderAlias]?.fullName || 'Someone';
         
-        if (!recipientInChat) {
-          // Recipient is not in chat, send push notification
-          console.log(`📱 [SOCKET SERVER] Sending push notification to ${recipientType} ${recipientId}`);
-          
-          const { sendToUser } = require("./pushNotificationService");
-          const senderName = messageWithDetails[senderAlias]?.fullName || 'Someone';
-          
-          sendToUser(
-            recipientId,
-            recipientType,
-            {
-              title: `New message from ${senderName}`,
-              body: message.length > 100 ? message.substring(0, 100) + '...' : message,
-            },
-            {
-              type: 'new_message',
-              taskId: taskId.toString(),
-              messageId: taskMessage.id.toString(),
-              senderId: userId,
-              senderType: userType,
-            }
-          ).catch(err => console.error('⚠️ Failed to send push notification for message:', err));
-        } else {
-          console.log(`ℹ️ [SOCKET SERVER] Recipient is in chat, skipping push notification`);
-        }
+        sendToUser(
+          recipientId,
+          recipientType,
+          {
+            title: `New message from ${senderName}`,
+            body: message.length > 100 ? message.substring(0, 100) + '...' : message,
+          },
+          {
+            type: 'new_message',
+            taskId: taskId.toString(),
+            messageId: taskMessage.id.toString(),
+            senderId: userId,
+            senderType: userType,
+            openChat: 'true',
+          }
+        ).catch(err => console.error('⚠️ Failed to send push notification for message:', err));
       } catch (error) {
         console.error("❌ [SOCKET SERVER] Error sending message:", error);
         socket.emit("messageError", { error: error.message });
