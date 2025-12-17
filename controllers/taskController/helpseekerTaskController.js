@@ -459,10 +459,19 @@ const publishTask = async (req, res) => {
                   
                   // NOW broadcast to helpers via socket AFTER association is complete
                   console.log(`📡 [PUBLISH] Broadcasting to helpers now that association is complete...`);
+                  console.log(`📡 [PUBLISH] Task data being broadcast:`, {
+                    taskId: jobData.taskId,
+                    title: jobData.title,
+                    associatedHelper: closestHelper.helperId,
+                    location: jobData.location,
+                  });
+                  
                   try {
                     await socketService.broadcastNewJobToSearchingHelpers(jobData);
+                    console.log(`✅ [PUBLISH] Socket broadcast completed successfully`);
                   } catch (socketError) {
-                    console.error(`⚠️ [PUBLISH] Failed to broadcast job via socket:`, socketError.message);
+                    console.error(`❌ [PUBLISH] Failed to broadcast job via socket:`, socketError.message);
+                    console.error(`❌ [PUBLISH] Socket error stack:`, socketError.stack);
                   }
                   
                   // Send push notification to the associated helper

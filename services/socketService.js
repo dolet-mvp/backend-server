@@ -735,6 +735,12 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
     const redis = require("../config/redis/redis");
     const { calculateDistance, getGoogleMapsDistances } = require("../controllers/taskController/helperTaskController");
     
+    console.log(`🚀 [SOCKET BROADCAST] Starting broadcast for new task`, {
+      taskId: taskData.taskId || taskData.id,
+      title: taskData.title,
+      hasLocation: !!(taskData.location || (taskData.steps && taskData.steps[0])),
+    });
+    
     // Get task location
     const taskLocation = taskData.location || (taskData.steps && taskData.steps[0] ? taskData.steps[0].location : null);
     
@@ -749,12 +755,16 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
     let broadcastCount = 0;
     let helpersInSearch = 0;
     let eligibleHelpers = 0;
+    let helpersChecked = 0;
 
     // Get all connected sockets
     const sockets = io.sockets.sockets;
     console.log(`🔍 [SOCKET BROADCAST] Checking ${sockets.size} connected sockets for task ${taskId}`);
+    console.log(`🔍 [SOCKET BROADCAST] Connected users in Map:`, connectedUsers.size);
     
     for (const [socketId, socket] of sockets) {
+      helpersChecked++;
+      
       // Get helper info from socket connection or job search data
       const userInfo = Array.from(connectedUsers.entries()).find(
         ([sid, user]) => sid === socketId && user.userType === 'helper'
@@ -766,7 +776,10 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
       const radius = socket.jobSearchData?.radius || 50; // Default 50km if not in search
       
       // Skip if not a helper
-      if (!helperId) continue;
+      if (!helperId) {
+        console.log(`⏭️ [SOCKET BROADCAST] Socket ${socketId} - not a helper (userType: ${userInfo?.[1]?.userType || 'none'})`);
+        continue;
+      }
       
       if (socket.jobSearchData) {
         helpersInSearch++;
@@ -873,9 +886,15 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
 
     console.log(`📊 [SOCKET BROADCAST] Summary for task ${taskData.taskId}:`);
     console.log(`   - Total sockets: ${sockets.size}`);
+    console.log(`   - Sockets checked: ${helpersChecked}`);
     console.log(`   - Helpers in job search: ${helpersInSearch}`);
     console.log(`   - Eligible helpers (in associated list): ${eligibleHelpers}`);
     console.log(`   - Successfully broadcasted to: ${broadcastCount} helpers`);
+    
+    if (broadcastCount === 0) {
+      console.warn(`⚠️ [SOCKET BROADCAST] WARNING: No helpers received the broadcast!`);
+      console.warn(`   - Check if helpers are connected and associated with task ${taskId}`);
+    }
   } catch (error) {
     console.error("❌ [SOCKET BROADCAST] Error broadcasting new job:", error);
   }
