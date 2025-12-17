@@ -389,11 +389,23 @@ const initSocketServer = (server) => {
           return;
         }
 
+        console.log('🔍 [SOCKET SERVER] Task authorization check:');
+        console.log('   Task ID:', taskId);
+        console.log('   Task helpseekerId:', task.helpseekerId);
+        console.log('   Task assignedHelperId:', task.assignedHelperId);
+        console.log('   Current userId:', userId);
+        console.log('   Current userType:', userType);
+        console.log('   Is helpseeker?:', task.helpseekerId === userId);
+        console.log('   Is assigned helper?:', task.assignedHelperId === userId);
+
         if (task.helpseekerId !== userId && task.assignedHelperId !== userId) {
           console.error(`❌ [SOCKET SERVER] Unauthorized access for task ${taskId} by user ${userId}`);
+          console.error('   Neither helpseeker nor assigned helper matches');
           socket.emit("messageError", { error: "Unauthorized", tempId });
           return;
         }
+        
+        console.log('✅ [SOCKET SERVER] Authorization check passed');
 
         // Create message
         const taskMessage = await TaskMessage.create({
