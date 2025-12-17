@@ -652,11 +652,23 @@ const broadcastHelperStatusChange = async (helperId, status, helperData) => {
   try {
     const io = getIO();
     
+    // Validate inputs
+    if (!helperId || !status) {
+      console.error("❌ [SOCKET SERVER] Invalid broadcast parameters: helperId and status are required");
+      return;
+    }
+    
+    if (!['online', 'offline'].includes(status)) {
+      console.error(`❌ [SOCKET SERVER] Invalid status: ${status}. Must be 'online' or 'offline'`);
+      return;
+    }
+    
+    // Ensure payload has consistent structure
     const payload = {
-      helperId,
+      helperId: helperId.toString(), // Ensure string
       status,
       timestamp: new Date().toISOString(),
-      ...helperData,
+      helper: helperData?.helper || null,
     };
     
     // Notify all helpseekers who might be interested
@@ -667,6 +679,7 @@ const broadcastHelperStatusChange = async (helperId, status, helperData) => {
     console.log(`👥 [SOCKET SERVER] Connected clients: ${io.engine.clientsCount}`);
   } catch (error) {
     console.error("❌ [SOCKET SERVER] Error broadcasting helper status:", error);
+    console.error("Stack trace:", error.stack);
   }
 };
 

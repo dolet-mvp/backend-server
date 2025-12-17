@@ -968,22 +968,31 @@ const getNearbyHelpers = async (req, res) => {
     // Step 2: Get full helper details from Redis
     console.log("\n📄 Step 2: Fetching helper details from Redis...");
     const helperDataPromises = onlineHelperIds.map(helperId => 
-      redis.get(`helper:online:${helperId}`)
+      redis.get(`helper:online:${helperId}`).catch(err => {
+        console.error(`⚠️ Failed to get helper ${helperId} from Redis:`, err.message);
+        return null;
+      })
     );
     
     const helperDataResults = await Promise.all(helperDataPromises);
     const onlineHelpers = helperDataResults
-      .filter(data => data !== null)
+      .filter(data => data !== null && data !== undefined)
       .map(data => {
-        // Upstash Redis returns objects directly if they were stored as JSON strings
-        // If it's already an object, return it; if it's a string, parse it
-        if (typeof data === 'string') {
-          return JSON.parse(data);
+        try {
+          // Upstash Redis returns objects directly if they were stored as JSON strings
+          // If it's already an object, return it; if it's a string, parse it
+          if (typeof data === 'string') {
+            return JSON.parse(data);
+          }
+          return data;
+        } catch (parseError) {
+          console.error('⚠️ Failed to parse helper data from Redis:', parseError.message);
+          return null;
         }
-        return data;
-      });
+      })
+      .filter(helper => helper !== null && helper !== undefined && typeof helper === 'object');
 
-    console.log(`✅ Retrieved ${onlineHelpers.length} helper profiles from Redis`);
+    console.log(`✅ Retrieved ${onlineHelpers.length} valid helper profiles from Redis`);
 
     // Step 3: Calculate distances and filter by radius
     console.log("\n📏 Step 3: Calculating distances and filtering by radius...");
@@ -992,11 +1001,18 @@ const getNearbyHelpers = async (req, res) => {
     const helperData = [];
 
     for (const helper of onlineHelpers) {
+      // Safety check: ensure helper has required fields
+      if (!helper || !helper.id) {
+        console.log(`⚠️  Invalid helper object, skipping`);
+        continue;
+      }
+
       // Get default address or first available address
-      const address = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
+      const addresses = Array.isArray(helper.addresses) ? helper.addresses : [];
+      const address = addresses.find(addr => addr && addr.isDefault) || addresses[0];
       
       if (!address || !address.latitude || !address.longitude) {
-        console.log(`⚠️  Helper ${helper.fullName} has no valid address, skipping`);
+        console.log(`⚠️  Helper ${helper.fullName || helper.id} has no valid address, skipping`);
         continue;
       }
 
@@ -1004,7 +1020,7 @@ const getNearbyHelpers = async (req, res) => {
       const helperLng = parseFloat(address.longitude);
 
       if (isNaN(helperLat) || isNaN(helperLng)) {
-        console.log(`⚠️  Helper ${helper.fullName} has invalid coordinates, skipping`);
+        console.log(`⚠️  Helper ${helper.fullName || helper.id} has invalid coordinates, skipping`);
         continue;
       }
 
