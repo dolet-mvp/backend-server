@@ -457,16 +457,32 @@ const initSocketServer = (server) => {
         const recipientId = userType === 'helper' ? task.helpseekerId : task.assignedHelperId;
         const recipientType = userType === 'helper' ? 'helpseeker' : 'helper';
         
+        console.log(`🔍 [SOCKET SERVER] Checking notification for recipient: ${recipientType} ${recipientId}`);
+        console.log(`👤 [SOCKET SERVER] Sender: ${userType} ${userId}`);
+        
         // Check if recipient is in the room (online in chat)
-        const recipientSocket = Array.from(connectedUsers.entries()).find(
-          ([socketId, user]) => user.userId === recipientId
+        // Find the recipient's socket(s) in connectedUsers
+        const recipientSockets = Array.from(connectedUsers.entries()).filter(
+          ([socketId, user]) => user.userId === recipientId && user.userType === recipientType
         );
         
-        const recipientInChat = recipientSocket && socketsInRoom && socketsInRoom.has(recipientSocket[0]);
+        console.log(`🔌 [SOCKET SERVER] Found ${recipientSockets.length} socket(s) for recipient ${recipientId}`);
+        
+        // Check if ANY of the recipient's sockets is in the chat room
+        let recipientInChat = false;
+        if (recipientSockets.length > 0 && socketsInRoom) {
+          recipientInChat = recipientSockets.some(([socketId]) => socketsInRoom.has(socketId));
+          console.log(`📊 [SOCKET SERVER] Recipient in chat room: ${recipientInChat}`);
+        }
+        
+        // Log all sockets in the room for debugging
+        if (socketsInRoom) {
+          console.log(`👥 [SOCKET SERVER] Sockets in room ${roomName}:`, Array.from(socketsInRoom));
+        }
         
         if (!recipientInChat) {
           // Recipient is not in chat, send push notification
-          console.log(`📱 [SOCKET SERVER] Sending push notification to ${recipientType} ${recipientId}`);
+          console.log(`📱 [SOCKET SERVER] Recipient NOT in chat, sending push notification to ${recipientType} ${recipientId}`);
           
           const { sendToUser } = require("./pushNotificationService");
           const senderName = messageWithDetails[senderAlias]?.fullName || 'Someone';
@@ -488,7 +504,7 @@ const initSocketServer = (server) => {
             }
           ).catch(err => console.error('⚠️ Failed to send push notification for message:', err));
         } else {
-          console.log(`ℹ️ [SOCKET SERVER] Recipient is in chat, skipping push notification`);
+          console.log(`ℹ️ [SOCKET SERVER] Recipient IS in chat room, skipping push notification`);
         }
       } catch (error) {
         console.error("❌ [SOCKET SERVER] Error sending message:", error);
