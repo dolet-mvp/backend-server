@@ -1360,6 +1360,73 @@ const cancelTask = async (req, res) => {
     // Remove from queue if exists
     await TaskQueue.destroy({ where: { taskId: task.id } });
 
+    // Clean up Redis and notify all associated helpers
+    try {
+      // Get associated helpers before cleanup
+      const associatedHelpersData = await redis.get(`task:${taskId}:associated_helpers`);
+      let associatedHelperIds = [];
+      
+      if (associatedHelpersData) {
+        associatedHelperIds = typeof associatedHelpersData === 'string' 
+          ? JSON.parse(associatedHelpersData) 
+          : associatedHelpersData;
+      }
+      
+      console.log(`🧹 [CANCEL TASK] Task ${taskId} cancelled - notifying ${associatedHelperIds.length} associated helpers`);
+      
+      // Remove task from Redis
+      await Promise.all([
+        redis.del(`job:${taskId}`),
+        redis.zrem('jobs:published', taskId),
+        redis.del(`task:${taskId}:associated_helpers`),
+        redis.del(`task:${taskId}:actions`),
+      ]);
+      
+      // Remove task from each helper's associated tasks
+      const cleanupPromises = associatedHelperIds.map(async (helperId) => {
+        const helperTasksKey = `helper:${helperId}:associated_tasks`;
+        const tasksData = await redis.get(helperTasksKey);
+        if (tasksData) {
+          const tasks = typeof tasksData === 'string' ? JSON.parse(tasksData) : tasksData;
+          const updatedTasks = tasks.filter(id => id !== taskId);
+          if (updatedTasks.length > 0) {
+            await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedTasks));
+          } else {
+            await redis.del(helperTasksKey);
+          }
+        }
+      });
+      await Promise.all(cleanupPromises);
+      
+      console.log(`✅ [CANCEL TASK] Redis cleanup completed for task ${taskId}`);
+      
+      // Emit socket event to all associated helpers
+      const io = socketService.getIO();
+      
+      for (const helperId of associatedHelperIds) {
+        // Find helper's socket
+        const helperSocketEntry = Array.from(socketService.connectedUsers.entries()).find(
+          ([socketId, user]) => user.userId === helperId && user.userType === 'helper'
+        );
+        
+        if (helperSocketEntry) {
+          const socketId = helperSocketEntry[0];
+          const socket = io.sockets.sockets.get(socketId);
+          if (socket) {
+            socket.emit('taskCancelled', {
+              taskId: taskId,
+              title: task.title,
+              reason: 'cancelled_by_helpseeker',
+            });
+            console.log(`📤 [CANCEL TASK] Notified helper ${helperId} via socket about task cancellation`);
+          }
+        }
+      }
+      
+    } catch (cleanupError) {
+      console.error(`⚠️ [CANCEL TASK] Redis cleanup failed:`, cleanupError.message);
+    }
+
     res.status(200).json({
       success: true,
       message: "Task cancelled successfully",
