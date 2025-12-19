@@ -106,6 +106,27 @@ const submitRating = async (req, res) => {
       }
     }
 
+    // Update helpseeker's average rating if rating a helpseeker
+    if (ratingType === "helper_to_user") {
+      const helpseeker = await Helpseeker.findByPk(revieweeId);
+
+      if (helpseeker) {
+        // Calculate new average
+        const allRatings = await Rating.findAll({
+          where: { revieweeId, revieweeType: "helpseeker", type: "helper_to_user" },
+        });
+
+        const totalRating = allRatings.reduce(
+          (sum, r) => sum + parseFloat(r.rating),
+          0
+        );
+        const avgRating = totalRating / allRatings.length;
+
+        helpseeker.averageRating = avgRating.toFixed(1);
+        await helpseeker.save();
+      }
+    }
+
     // Notify reviewee
     await createNotification({
       userId: revieweeId,

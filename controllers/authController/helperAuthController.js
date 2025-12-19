@@ -144,7 +144,7 @@ const handleHelperUploadDocument = async (req, res) => {
 const getHelperProfile = async (req, res) => {
   try {
     const helperId = req.user.id;
-
+    
     const helper = await Helper.findByPk(helperId, {
       attributes: { exclude: ["password"] },
     });

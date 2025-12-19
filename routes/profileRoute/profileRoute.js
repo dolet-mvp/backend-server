@@ -15,6 +15,7 @@ router.get(
   checkUserType("helper"),
   getHelperProfile
 );
+
 router.put(
   "/helper/profile",
   checkForAuthenticationCookie(),
