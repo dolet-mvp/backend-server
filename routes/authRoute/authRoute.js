@@ -34,10 +34,10 @@ router.post(
 );
 router.post("/helper/registerOrlogin", handleHelperRegisterOrLogin);
 
-// HELPSEEKER ROUTES
+//HELPSEEKER ROUTES
 router.post("/helpseeker/register", handleHelpseekerRegister);
 
-// ADMIN ROUTES
+//ADMIN ROUTES
 router.post("/admin/login", handleAdminLogin);
 router.get(
   "/admin/helpers/pending",

@@ -14,12 +14,12 @@ const getTaskById = async (req, res) => {
         {
           model: Helpseeker,
           as: "creator",
-          attributes: ["id", "fullName", "profilePhoto", "phone"],
+          attributes: ["id", "fullName", "profilePhoto", "phone","averageRating","totalTasksPosted"],
         },
         {
           model: Helper,
           as: "assignedHelper",
-          attributes: ["id", "fullName", "profilePhoto", "phone"],
+          attributes: ["id", "fullName", "profilePhoto", "phone","averageRating","totalEarnings","completedTasks" ],
         },
       ],
     });
