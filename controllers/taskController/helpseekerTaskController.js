@@ -1887,6 +1887,181 @@ const regenerateOTP = async (req, res) => {
   }
 };
 
+// Get task rejections with reasons and suggested minimum prices (Helpseeker)
+const getTaskRejections = async (req, res) => {
+  try {
+    const helpseekerId = req.user.id;
+    const { taskId } = req.params;
+
+    // Verify task exists and belongs to the helpseeker
+    const task = await Task.findByPk(taskId, {
+      attributes: ['id', 'title', 'description', 'budget', 'status', 'helpseekerId'],
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    if (task.helpseekerId !== helpseekerId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view rejections for this task",
+      });
+    }
+
+    // Fetch all rejections for this task
+    const TaskRejection = require("../../models/taskRejectionModel/taskRejectionModel");
+    const rejections = await TaskRejection.findAll({
+      where: { taskId },
+      include: [
+        {
+          model: Helper,
+          as: "helper",
+          attributes: ["id", "fullName", "averageRating"],
+        },
+      ],
+      order: [["rejectedAt", "DESC"]],
+    });
+
+    if (rejections.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "No rejections found for this task",
+        data: {
+          taskId,
+          taskTitle: task.title,
+          currentBudget: task.budget,
+          totalRejections: 0,
+          rejections: [],
+          priceAnalysis: null,
+          suggestions: [],
+        },
+      });
+    }
+
+    // Categorize rejections by reason
+    const rejectionsByCategory = {
+      price: [],
+      distance: [],
+      availability: [],
+      skills: [],
+      other: [],
+    };
+
+    rejections.forEach((rejection) => {
+      const category = rejection.reasonCategory || 'other';
+      rejectionsByCategory[category].push({
+        helperId: rejection.helperId,
+        helperName: rejection.helper?.fullName || 'Unknown',
+        helperRating: rejection.helper?.averageRating || null,
+        reason: rejection.reason,
+        minPrice: rejection.minPrice,
+        rejectedAt: rejection.rejectedAt,
+      });
+    });
+
+    // Analyze price-based rejections
+    let priceAnalysis = null;
+    const priceRejections = rejectionsByCategory.price.filter(r => r.minPrice !== null);
+    
+    if (priceRejections.length > 0) {
+      const minPrices = priceRejections.map(r => parseFloat(r.minPrice));
+      const minOfMin = Math.min(...minPrices);
+      const maxOfMin = Math.max(...minPrices);
+      const avgOfMin = minPrices.reduce((sum, price) => sum + price, 0) / minPrices.length;
+
+      priceAnalysis = {
+        totalPriceRejections: priceRejections.length,
+        currentBudget: parseFloat(task.budget),
+        suggestedMinimumPrice: minOfMin,
+        suggestedMaximumPrice: maxOfMin,
+        averageSuggestedPrice: Math.round(avgOfMin * 100) / 100,
+        priceRange: {
+          lowest: minOfMin,
+          highest: maxOfMin,
+        },
+        allSuggestedPrices: minPrices.sort((a, b) => a - b),
+      };
+    }
+
+    // Generate suggestions
+    const suggestions = [];
+    
+    if (priceRejections.length > 0 && priceAnalysis) {
+      const currentBudget = parseFloat(task.budget);
+      const suggestedPrice = priceAnalysis.averageSuggestedPrice;
+      const increaseAmount = suggestedPrice - currentBudget;
+      const increasePercent = Math.round((increaseAmount / currentBudget) * 100);
+
+      suggestions.push({
+        type: "price",
+        priority: "high",
+        message: `${priceRejections.length} helper(s) rejected due to low budget. Consider increasing budget to ₹${suggestedPrice} (${increasePercent}% increase).`,
+        actionable: true,
+        suggestedBudget: suggestedPrice,
+      });
+    }
+
+    if (rejectionsByCategory.distance.length > 0) {
+      suggestions.push({
+        type: "distance",
+        priority: "medium",
+        message: `${rejectionsByCategory.distance.length} helper(s) rejected due to distance. Consider expanding your search radius or offering travel compensation.`,
+        actionable: true,
+      });
+    }
+
+    if (rejectionsByCategory.availability.length > 0) {
+      suggestions.push({
+        type: "availability",
+        priority: "medium",
+        message: `${rejectionsByCategory.availability.length} helper(s) were unavailable. Consider adjusting your timeline or scheduling flexibility.`,
+        actionable: true,
+      });
+    }
+
+    if (rejectionsByCategory.skills.length > 0) {
+      suggestions.push({
+        type: "skills",
+        priority: "low",
+        message: `${rejectionsByCategory.skills.length} helper(s) rejected due to skill mismatch. Your task requirements might be too specific.`,
+        actionable: false,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Task rejections retrieved successfully",
+      data: {
+        taskId,
+        taskTitle: task.title,
+        currentBudget: task.budget,
+        totalRejections: rejections.length,
+        rejectionsByCategory: {
+          price: rejectionsByCategory.price.length,
+          distance: rejectionsByCategory.distance.length,
+          availability: rejectionsByCategory.availability.length,
+          skills: rejectionsByCategory.skills.length,
+          other: rejectionsByCategory.other.length,
+        },
+        rejections: rejectionsByCategory,
+        priceAnalysis,
+        suggestions,
+      },
+    });
+  } catch (error) {
+    console.error("Get task rejections error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve task rejections",
+      error: error.message,
+    });
+  }
+};
+
 
 
 module.exports = {
@@ -1902,5 +2077,6 @@ module.exports = {
   increaseReward,
   regenerateOTP,
   getGoogleMapsDistances,
+  getTaskRejections,
 
 };

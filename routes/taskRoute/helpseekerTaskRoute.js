@@ -13,6 +13,7 @@ const {
   cancelTask,
   increaseReward,
   regenerateOTP,
+  getTaskRejections,
 } = require("../../controllers/taskController/helpseekerTaskController");
 
 const { checkUserType,checkForAuthenticationCookie } = require("../../middleware/authMiddleware");
@@ -99,6 +100,14 @@ router.post(
   checkForAuthenticationCookie(),
   checkUserType(["helpseeker"]),
   regenerateOTP
+);
+
+// Get task rejections with reasons and suggested prices
+router.get(
+  "/:taskId/rejections",
+  checkForAuthenticationCookie(),
+  checkUserType(["helpseeker", "helper"]),
+  getTaskRejections
 );
 
 module.exports = router;

@@ -15,6 +15,7 @@ const SupportTicket = require("../supportModel/supportTicketModel");
 const TicketReply = require("../supportModel/ticketReplyModel");
 const DeviceToken = require("../deviceTokenModel/deviceToken");
 const BlockedUser = require("../blockedUserModel/blockedUserModel");
+const TaskRejection = require("../taskRejectionModel/taskRejectionModel");
 
 Helper.hasMany(Address, {
   foreignKey: "helperId",
@@ -413,6 +414,29 @@ BlockedUser.belongsTo(Admin, {
   constraints: false,
 });
 
+// TaskRejection associations
+// Task -> TaskRejection (One-to-Many)
+Task.hasMany(TaskRejection, {
+  foreignKey: "taskId",
+  as: "rejections",
+});
+
+TaskRejection.belongsTo(Task, {
+  foreignKey: "taskId",
+  as: "task",
+});
+
+// Helper -> TaskRejection (One-to-Many)
+Helper.hasMany(TaskRejection, {
+  foreignKey: "helperId",
+  as: "rejectedTasks",
+});
+
+TaskRejection.belongsTo(Helper, {
+  foreignKey: "helperId",
+  as: "helper",
+});
+
 
 module.exports = {
   Helper,
@@ -432,4 +456,5 @@ module.exports = {
   TicketReply,
   DeviceToken,
   BlockedUser,
+  TaskRejection,
 };

@@ -894,10 +894,11 @@ const rejectTask = async (req, res) => {
   try {
     const helperId = req.user.id;
     const { taskId } = req.params;
-    const { reason } = req.body;
+    const { reason, reasonCategory, minPrice } = req.body;
 
     // Reason is optional - can be submitted later
     const rejectionReason = reason && reason.trim().length > 0 ? reason.trim() : 'No reason provided';
+    const category = reasonCategory || 'other';
 
     const task = await Task.findByPk(taskId, {
       include: [
@@ -944,6 +945,17 @@ const rejectTask = async (req, res) => {
 
     // Store rejection in Redis immediately (even without reason)
     const actions = await storeHelperAction(taskId, helperId, 'rejected', rejectionReason);
+    
+    // Store rejection in database
+    const TaskRejection = require("../../models/taskRejectionModel/taskRejectionModel");
+    await TaskRejection.create({
+      taskId,
+      helperId,
+      reason: rejectionReason,
+      reasonCategory: category,
+      minPrice: minPrice && category === 'price' ? parseFloat(minPrice) : null,
+      rejectedAt: new Date(),
+    });
     
     // PERFORMANCE FIX: Batch fetch both association lists in parallel
     const associationStart = Date.now();
@@ -1224,7 +1236,7 @@ const updateRejectionReason = async (req, res) => {
   try {
     const helperId = req.user.id;
     const { taskId } = req.params;
-    const { reason } = req.body;
+    const { reason, reasonCategory, minPrice } = req.body;
 
     if (!reason || reason.trim().length === 0) {
       return res.status(400).json({
@@ -1233,35 +1245,48 @@ const updateRejectionReason = async (req, res) => {
       });
     }
 
-    // Check if helper has rejected this task
-    const actionsKey = `task:${taskId}:actions`;
-    const actionsData = await redis.get(actionsKey);
-    
-    if (!actionsData) {
+    // Check if helper has rejected this task in database
+    const TaskRejection = require("../../models/taskRejectionModel/taskRejectionModel");
+    const rejection = await TaskRejection.findOne({
+      where: {
+        taskId,
+        helperId,
+      },
+    });
+
+    if (!rejection) {
       return res.status(404).json({
         success: false,
         message: "No rejection record found for this task",
       });
     }
 
-    const actions = typeof actionsData === 'string' 
-      ? JSON.parse(actionsData) 
-      : actionsData;
-    const helperAction = actions.find(a => a.helperId === helperId && a.action === 'rejected');
-    
-    if (!helperAction) {
-      return res.status(404).json({
-        success: false,
-        message: "You have not rejected this task",
-      });
-    }
+    // Update the rejection in database
+    const category = reasonCategory || rejection.reasonCategory || 'other';
+    await rejection.update({
+      reason: reason.trim(),
+      reasonCategory: category,
+      minPrice: minPrice && category === 'price' ? parseFloat(minPrice) : rejection.minPrice,
+    });
 
-    // Update the reason
-    helperAction.reason = reason.trim();
-    helperAction.reasonUpdatedAt = new Date().toISOString();
+    // Also update Redis for backward compatibility
+    const actionsKey = `task:${taskId}:actions`;
+    const actionsData = await redis.get(actionsKey);
     
-    await redis.set(actionsKey, JSON.stringify(actions));
-    await redis.expire(actionsKey, 86400); // 24 hours
+    if (actionsData) {
+      const actions = typeof actionsData === 'string' 
+        ? JSON.parse(actionsData) 
+        : actionsData;
+      const helperAction = actions.find(a => a.helperId === helperId && a.action === 'rejected');
+      
+      if (helperAction) {
+        helperAction.reason = reason.trim();
+        helperAction.reasonUpdatedAt = new Date().toISOString();
+        
+        await redis.set(actionsKey, JSON.stringify(actions));
+        await redis.expire(actionsKey, 86400); // 24 hours
+      }
+    }
 
     // Get task details for notification
     const task = await Task.findByPk(taskId, {
@@ -1291,7 +1316,9 @@ const updateRejectionReason = async (req, res) => {
       data: {
         taskId,
         reason: reason.trim(),
-        updatedAt: helperAction.reasonUpdatedAt,
+        reasonCategory: category,
+        minPrice: rejection.minPrice,
+        updatedAt: rejection.updatedAt,
       },
     });
   } catch (error) {
