@@ -160,6 +160,18 @@ const completeWork = async (req, res) => {
     task.completedAt = new Date();
     await task.save();
 
+    // Add task budget to helper's total earnings
+    if (task.budget) {
+      const helper = await Helper.findByPk(helperId);
+      if (helper) {
+        const currentEarnings = parseFloat(helper.totalEarnings) || 0;
+        const taskBudget = parseFloat(task.budget) || 0;
+        helper.totalEarnings = currentEarnings + taskBudget;
+        await helper.save();
+        console.log(`💰 Added ${taskBudget} to helper ${helperId} earnings. New total: ${helper.totalEarnings}`);
+      }
+    }
+
     // Remove tracking keys from Redis
     try {
       const helperTrackingKey = `tracking:task:${taskId}:helper:${helperId}`;
