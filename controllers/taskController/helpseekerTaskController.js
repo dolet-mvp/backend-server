@@ -229,6 +229,9 @@ const publishTask = async (req, res) => {
     await transaction.commit();
     transaction = null;
 
+    // Fetch helpseeker data for Redis
+    const helpseeker = await Helpseeker.findByPk(helpseekerId);
+
     // Store the published job in Redis
     try {
       // Use main location or first step location for job data
@@ -237,6 +240,8 @@ const publishTask = async (req, res) => {
       const jobData = {
         taskId: task.id,
         helpseekerId: helpseekerId,
+        helpseekerName: helpseeker?.fullName || null,
+        helpseekerRating: helpseeker?.averageRating || 0.0,
         title: task.title,
         description: task.description,
         category: task.category,
@@ -1525,10 +1530,15 @@ const increaseReward = async (req, res) => {
     }
     await redis.del(`task:${taskId}:associated_helpers`);
 
+    // Fetch helpseeker data for Redis
+    const helpseeker = await Helpseeker.findByPk(helpseekerId);
+    
     // Update Redis job data with new budget
     const jobData = {
       taskId: task.id,
       helpseekerId: helpseekerId,
+      helpseekerName: helpseeker?.fullName || null,
+      helpseekerRating: helpseeker?.averageRating || 0.0,
       title: task.title,
       description: task.description,
       category: task.category,
