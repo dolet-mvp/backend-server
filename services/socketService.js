@@ -313,6 +313,8 @@ const initSocketServer = (server) => {
           latitude: helperLat,
           longitude: helperLng,
           radius: searchRadius,
+          joinedAt: Date.now(), // Track when helper joined job search
+          readyToReceive: true,  // Flag indicating helper is ready to receive tasks
         };
 
         const roomName = `job:search:${userId}`;
@@ -324,12 +326,14 @@ const initSocketServer = (server) => {
         console.log(`🔍 [SOCKET] Socket ID: ${socket.id}`);
         console.log(`🔍 [SOCKET] Socket connected: ${socket.connected}`);
         console.log(`🔍 [SOCKET] jobSearchData:`, socket.jobSearchData);
+        console.log(`✅ [SOCKET] Helper marked as READY TO RECEIVE tasks`);
         console.log(`✅ [SOCKET] ========================================`);
         
         socket.emit("joinedJobSearch", { 
           message: "Connected to real-time job updates",
           location: { lat: helperLat, lng: helperLng },
-          radius: searchRadius
+          radius: searchRadius,
+          readyToReceive: true
         });
 
         // Send initial available tasks (reuse getAvailableTasks logic)
@@ -799,10 +803,17 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
       const latitude = socket.jobSearchData?.latitude;
       const longitude = socket.jobSearchData?.longitude;
       const radius = socket.jobSearchData?.radius || 50; // Default 50km if not in search
+      const readyToReceive = socket.jobSearchData?.readyToReceive || false;
       
       // Skip if not a helper
       if (!helperId) {
         console.log(`⏭️ [SOCKET BROADCAST] Socket ${socketId} - not a helper (userType: ${userInfo?.[1]?.userType || 'none'})`);
+        continue;
+      }
+      
+      // ⚡ CRITICAL FIX: Only send to helpers who have explicitly joined job search and are ready
+      if (!socket.jobSearchData || !readyToReceive) {
+        console.log(`⏭️ [SOCKET BROADCAST] Helper ${helperId} not ready to receive (joined: ${!!socket.jobSearchData}, ready: ${readyToReceive})`);
         continue;
       }
       
