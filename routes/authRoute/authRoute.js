@@ -14,6 +14,11 @@ const {
   rejectHelper,
   getAllHelpers,
   handleAdminSignup,
+  getHelperDetails,
+  getHelperTasks,
+  getAllHelpseekers,
+  getHelpseekerDetails,
+  getHelpseekerTasks,
 } = require("../../controllers/authController/adminAuthController");
 const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
 const supabaseUpload = require("../../config/uploadConfig/supabaseUpload");
@@ -62,6 +67,24 @@ router.get(
   checkForAuthenticationCookie(),
   checkUserType("admin"),
   getAllHelpers
+);
+router.get(
+  "/admin/helpers/:helperId",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  getHelperDetails
+);
+router.get(
+  "/admin/helpseekers",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  getAllHelpseekers
+);
+router.get(
+  "/admin/helpseekers/:helpseekerId",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  getHelpseekerDetails
 );
 router.post(
   "/admin/register",

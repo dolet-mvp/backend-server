@@ -83,6 +83,7 @@ const taskMessageRoutes = require("./routes/messageRoute/taskMessageRoute");
 const geminiRoutes = require("./routes/aiRoute/gemniRoute");
 const reportRoutes = require("./routes/reportRoute/reportRoute");
 const blockRoutes = require("./routes/blockRoute/blockRoute");
+const adminRoutes = require("./routes/adminRoute/adminRoute");
 const optionalAuthentication = require("./middleware/authMiddleware").optionalAuthentication;
 
 
@@ -174,6 +175,12 @@ app.use(
 app.use(
   "/api/admin/blocks",
   blockRoutes
+);
+
+// Admin routes
+app.use(
+  "/api/admin",
+  adminRoutes
 );
 
 

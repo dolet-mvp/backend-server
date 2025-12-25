@@ -1,5 +1,7 @@
 const Admin = require("../../models/authModel/adminModel");
 const Helper = require("../../models/authModel/helperModel");
+const Task = require("../../models/taskModel/taskModel");
+const Helpseeker = require("../../models/authModel/helpseekerModel");
 const { createToken } = require("../../services/authServices");
 const bcrypt = require("bcryptjs");
 
@@ -267,6 +269,221 @@ const handleAdminSignup = async (req, res) => {
 };
 
 
+const getHelperDetails = async (req, res) => {
+  try {
+    const { helperId } = req.params;
+
+    const helper = await Helper.findByPk(helperId, {
+      attributes: { exclude: ["password"] },
+    });
+
+    if (!helper) {
+      return res.status(404).json({
+        success: false,
+        message: "Helper not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      helper,
+    });
+  } catch (error) {
+    console.error("Get helper details error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+
+const getHelperTasks = async (req, res) => {
+  try {
+    const { helperId } = req.params;
+    const { status, limit = 50, offset = 0 } = req.query;
+
+    // Verify helper exists
+    const helper = await Helper.findByPk(helperId);
+    if (!helper) {
+      return res.status(404).json({
+        success: false,
+        message: "Helper not found",
+      });
+    }
+
+    const where = { assignedHelperId: helperId };
+    if (status) {
+      where.status = status;
+    }
+
+    const { count, rows: tasks } = await Task.findAndCountAll({
+      where,
+      include: [
+        {
+          model: Helpseeker,
+          as: "creator",
+          attributes: ["id", "fullName", "phone", "email", "profilePhoto"],
+        },
+      ],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Format tasks for response
+    const formattedTasks = tasks.map(task => ({
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      price: task.budget,
+      createdAt: task.createdAt,
+      completedAt: task.completedAt,
+      rating: task.rating,
+      helpseekerName: task.creator?.fullName || "Unknown",
+      helpseekerPhone: task.creator?.phone,
+      helpseekerEmail: task.creator?.email,
+    }));
+
+    res.json({
+      success: true,
+      total: count,
+      tasks: formattedTasks,
+    });
+  } catch (error) {
+    console.error("Get helper tasks error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+
+const getAllHelpseekers = async (req, res) => {
+  try {
+    const { limit = 50, offset = 0 } = req.query;
+
+    const { count, rows: helpseekers } = await Helpseeker.findAndCountAll({
+      attributes: { exclude: ["password"] },
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.json({
+      success: true,
+      total: count,
+      helpseekers,
+    });
+  } catch (error) {
+    console.error("Get all helpseekers error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+
+const getHelpseekerDetails = async (req, res) => {
+  try {
+    const { helpseekerId } = req.params;
+
+    const helpseeker = await Helpseeker.findByPk(helpseekerId, {
+      attributes: { exclude: ["password"] },
+    });
+
+    if (!helpseeker) {
+      return res.status(404).json({
+        success: false,
+        message: "Helpseeker not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      helpseeker,
+    });
+  } catch (error) {
+    console.error("Get helpseeker details error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+
+const getHelpseekerTasks = async (req, res) => {
+  try {
+    const { helpseekerId } = req.params;
+    const { status, limit = 50, offset = 0 } = req.query;
+
+    // Verify helpseeker exists
+    const helpseeker = await Helpseeker.findByPk(helpseekerId);
+    if (!helpseeker) {
+      return res.status(404).json({
+        success: false,
+        message: "Helpseeker not found",
+      });
+    }
+
+    const where = { helpseekerId };
+    if (status) {
+      where.status = status;
+    }
+
+    const { count, rows: tasks } = await Task.findAndCountAll({
+      where,
+      include: [
+        {
+          model: Helper,
+          as: "assignedHelper",
+          attributes: ["id", "fullName", "phone", "email", "profilePhoto"],
+        },
+      ],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Format tasks for response
+    const formattedTasks = tasks.map(task => ({
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      price: task.budget,
+      createdAt: task.createdAt,
+      completedAt: task.completedAt,
+      rating: task.rating,
+      helperName: task.assignedHelper?.fullName || "Not Assigned",
+      helperPhone: task.assignedHelper?.phone,
+      helperEmail: task.assignedHelper?.email,
+    }));
+
+    res.json({
+      success: true,
+      total: count,
+      tasks: formattedTasks,
+    });
+  } catch (error) {
+    console.error("Get helpseeker tasks error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+
 module.exports = {
   handleAdminLogin,
   getPendingHelpers,
@@ -274,4 +491,9 @@ module.exports = {
   rejectHelper,
   getAllHelpers,
   handleAdminSignup,
+  getHelperDetails,
+  getHelperTasks,
+  getAllHelpseekers,
+  getHelpseekerDetails,
+  getHelpseekerTasks,
 };
