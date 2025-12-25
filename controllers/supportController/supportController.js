@@ -668,6 +668,34 @@ const getTicketStatistics = async (req, res) => {
   }
 };
 
+const getSupportAnalytics = async (req, res) => {
+  try {
+    const totalTickets = await SupportTicket.count();
+    const openTickets = await SupportTicket.count({ where: { status: "open" } });
+    const inProgressTickets = await SupportTicket.count({ where: { status: "in_progress" } });
+    const resolvedTickets = await SupportTicket.count({ where: { status: "resolved" } });
+    const closedTickets = await SupportTicket.count({ where: { status: "closed" } });
+
+    res.status(200).json({
+      success: true,
+      analytics: {
+        total: totalTickets,
+        open: openTickets,
+        in_progress: inProgressTickets,
+        resolved: resolvedTickets,
+        closed: closedTickets,
+      },
+    });
+  } catch (error) {
+    console.error("Get support analytics error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch support analytics",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createTicket,
   getMyTickets,
@@ -676,4 +704,5 @@ module.exports = {
   getAllTickets,
   updateTicketStatus,
   getTicketStatistics,
+  getSupportAnalytics,
 };

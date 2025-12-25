@@ -7,6 +7,7 @@ const {
   getReportById,
   updateReport,
   getReportStats,
+  getReportAnalytics,
 } = require("../../controllers/reportController/reportController");
 
 const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
@@ -43,6 +44,14 @@ router.get(
   checkForAuthenticationCookie(),
   checkUserType(["admin"]),
   getReportStats
+);
+
+// Get report analytics (must be before /:reportId)
+router.get(
+  "/admin/analytics",
+  checkForAuthenticationCookie(),
+  checkUserType(["admin"]),
+  getReportAnalytics
 );
 
 // Get specific report by ID

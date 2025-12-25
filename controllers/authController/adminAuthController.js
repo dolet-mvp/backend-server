@@ -804,6 +804,54 @@ const disableTwoFactor = async (req, res) => {
   }
 };
 
+// Get helper analytics
+const getHelperAnalytics = async (req, res) => {
+  try {
+    const totalHelpers = await Helper.count();
+    const approvedHelpers = await Helper.count({ where: { verificationStatus: 'approved' } });
+    const pendingHelpers = await Helper.count({ where: { verificationStatus: 'submitted' } });
+    const rejectedHelpers = await Helper.count({ where: { verificationStatus: 'rejected' } });
+
+    res.status(200).json({
+      success: true,
+      analytics: {
+        total: totalHelpers,
+        approved: approvedHelpers,
+        pending: pendingHelpers,
+        rejected: rejectedHelpers,
+      },
+    });
+  } catch (error) {
+    console.error('Get helper analytics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch helper analytics',
+      error: error.message,
+    });
+  }
+};
+
+// Get helpseeker analytics
+const getHelpseekerAnalytics = async (req, res) => {
+  try {
+    const totalHelpseekers = await Helpseeker.count();
+
+    res.status(200).json({
+      success: true,
+      analytics: {
+        total: totalHelpseekers,
+      },
+    });
+  } catch (error) {
+    console.error('Get helpseeker analytics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch helpseeker analytics',
+      error: error.message,
+    });
+  }
+};
+
 
 module.exports = {
   handleAdminLogin,
@@ -822,4 +870,6 @@ module.exports = {
   generateTwoFactorSecret,
   enableTwoFactor,
   disableTwoFactor,
+  getHelperAnalytics,
+  getHelpseekerAnalytics,
 };

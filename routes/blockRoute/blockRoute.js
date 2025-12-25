@@ -6,6 +6,7 @@ const {
   getAllBlockedUsers,
   getUserBlockHistory,
   checkUserBlockStatus,
+  getBlockAnalytics,
 } = require("../../controllers/blockController/blockController");
 const {
   checkForAuthenticationCookie,
@@ -24,6 +25,13 @@ router.post(
   checkForAuthenticationCookie(),
   checkUserType(["admin"]),
   unblockUser
+);
+
+router.get(
+  "/analytics",
+  checkForAuthenticationCookie(),
+  checkUserType(["admin"]),
+  getBlockAnalytics
 );
 
 router.get(

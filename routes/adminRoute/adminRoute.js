@@ -8,7 +8,9 @@ const {
   changeAdminPassword,
   generateTwoFactorSecret,
   enableTwoFactor,
-  disableTwoFactor
+  disableTwoFactor,
+  getHelperAnalytics,
+  getHelpseekerAnalytics
 } = require("../../controllers/authController/adminAuthController");
 
 // Update admin profile
@@ -49,6 +51,22 @@ router.post(
   checkForAuthenticationCookie(),
   checkUserType("admin"),
   disableTwoFactor
+);
+
+// Get helper analytics
+router.get(
+  "/helpers/analytics",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  getHelperAnalytics
+);
+
+// Get helpseeker analytics
+router.get(
+  "/helpseekers/analytics",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  getHelpseekerAnalytics
 );
 
 // Get all tasks for a specific helper

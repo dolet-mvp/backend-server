@@ -8,6 +8,7 @@ const {
   getAllTickets,
   updateTicketStatus,
   getTicketStatistics,
+  getSupportAnalytics,
 } = require("../../controllers/supportController/supportController");
 const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
 const supabaseUpload = require("../../config/uploadConfig/supabaseUpload");
@@ -44,6 +45,13 @@ router.post(
 );
 
 // Admin Routes
+router.get(
+  "/admin/analytics",
+  checkForAuthenticationCookie(),
+  checkUserType(["admin"]),
+  getSupportAnalytics
+);
+
 router.get(
   "/admin/tickets",
   checkForAuthenticationCookie(),

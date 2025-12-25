@@ -444,10 +444,50 @@ const checkUserBlockStatus = async (req, res) => {
   }
 };
 
+const getBlockAnalytics = async (req, res) => {
+  try {
+    // Get total blocks
+    const totalBlocks = await BlockedUser.count();
+
+    // Get active blocks (isActive = true)
+    const activeBlocks = await BlockedUser.count({
+      where: { isActive: true }
+    });
+
+    // Get permanent blocks
+    const permanentBlocks = await BlockedUser.count({
+      where: { blockType: 'permanent' }
+    });
+
+    // Get temporary blocks
+    const temporaryBlocks = await BlockedUser.count({
+      where: { blockType: 'temporary' }
+    });
+
+    return res.status(200).json({
+      success: true,
+      analytics: {
+        total: totalBlocks,
+        active: activeBlocks,
+        permanent: permanentBlocks,
+        temporary: temporaryBlocks
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching block analytics:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch block analytics",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   blockUser,
   unblockUser,
   getAllBlockedUsers,
   getUserBlockHistory,
   checkUserBlockStatus,
+  getBlockAnalytics,
 };

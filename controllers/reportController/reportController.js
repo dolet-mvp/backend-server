@@ -446,6 +446,34 @@ const getReportStats = async (req, res) => {
   }
 };
 
+const getReportAnalytics = async (req, res) => {
+  try {
+    const totalReports = await Report.count();
+    const pendingReports = await Report.count({ where: { status: "pending" } });
+    const underReviewReports = await Report.count({ where: { status: "under_review" } });
+    const resolvedReports = await Report.count({ where: { status: "resolved" } });
+    const dismissedReports = await Report.count({ where: { status: "dismissed" } });
+
+    res.status(200).json({
+      success: true,
+      analytics: {
+        total: totalReports,
+        pending: pendingReports,
+        under_review: underReviewReports,
+        resolved: resolvedReports,
+        dismissed: dismissedReports,
+      },
+    });
+  } catch (error) {
+    console.error("Get report analytics error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch report analytics",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createReport,
   getMyReports,
@@ -453,4 +481,5 @@ module.exports = {
   getReportById,
   updateReport,
   getReportStats,
+  getReportAnalytics,
 };
