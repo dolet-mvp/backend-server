@@ -4,11 +4,13 @@ const Task = require("../../models/taskModel/taskModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const { createToken } = require("../../services/authServices");
 const bcrypt = require("bcryptjs");
+const speakeasy = require("speakeasy");
+const QRCode = require("qrcode");
 
 
 const handleAdminLogin = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, twoFactorCode } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
@@ -43,10 +45,39 @@ const handleAdminLogin = async (req, res) => {
       });
     }
 
+    // Check if 2FA is enabled
+    if (admin.twoFactorEnabled) {
+      if (!twoFactorCode) {
+        return res.status(200).json({
+          success: true,
+          requires2FA: true,
+          message: "Please provide 2FA code",
+        });
+      }
+
+      // Verify 2FA code
+      const verified = speakeasy.totp.verify({
+        secret: admin.twoFactorSecret,
+        encoding: "base32",
+        token: twoFactorCode,
+        window: 2, // Allow 2 time steps before/after for clock drift
+      });
+
+      if (!verified) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid 2FA code",
+        });
+      }
+    }
+
+    // Update last login
+    await admin.update({ lastLogin: new Date() });
+
     // Generate token
     const token = createToken(admin, "admin");
 
-    const { password: _, ...adminData } = admin.toJSON();
+    const { password: _, twoFactorSecret: __, ...adminData } = admin.toJSON();
 
     res.json({
       success: true,
@@ -483,6 +514,286 @@ const getHelpseekerTasks = async (req, res) => {
   }
 };
 
+// Update admin profile
+const updateAdminProfile = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { fullName, email, phone } = req.body;
+
+    // Find admin
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    // Check if email is being changed and if it's already taken
+    if (email && email !== admin.email) {
+      const emailExists = await Admin.findOne({ where: { email } });
+      if (emailExists) {
+        return res.status(400).json({
+          success: false,
+          message: "Email already in use",
+        });
+      }
+    }
+
+    // Check if phone is being changed and if it's already taken
+    if (phone && phone !== admin.phone) {
+      const phoneExists = await Admin.findOne({ where: { phone } });
+      if (phoneExists) {
+        return res.status(400).json({
+          success: false,
+          message: "Phone number already in use",
+        });
+      }
+    }
+
+    // Update admin
+    await admin.update({
+      fullName: fullName || admin.fullName,
+      email: email || admin.email,
+      phone: phone || admin.phone,
+    });
+
+    const { password: _, ...updatedAdminData } = admin.toJSON();
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      admin: updatedAdminData,
+    });
+  } catch (error) {
+    console.error("Update admin profile error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Change admin password
+const changeAdminPassword = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password and new password are required",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters",
+      });
+    }
+
+    // Find admin
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, admin.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Current password is incorrect",
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password
+    await admin.update({
+      password: hashedPassword,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Password changed successfully",
+    });
+  } catch (error) {
+    console.error("Change admin password error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Generate 2FA secret and QR code
+const generateTwoFactorSecret = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+
+    // Find admin
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    // Generate secret
+    const secret = speakeasy.generateSecret({
+      name: `Dolet Admin (${admin.email})`,
+      issuer: "Dolet",
+    });
+
+    // Generate QR code
+    const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url);
+
+    // Store temporary secret (not enabled yet)
+    await admin.update({
+      twoFactorSecret: secret.base32,
+      twoFactorEnabled: false,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "2FA secret generated",
+      secret: secret.base32,
+      qrCode: qrCodeUrl,
+    });
+  } catch (error) {
+    console.error("Generate 2FA secret error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Enable 2FA after verifying the code
+const enableTwoFactor = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: "Verification code is required",
+      });
+    }
+
+    // Find admin
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    if (!admin.twoFactorSecret) {
+      return res.status(400).json({
+        success: false,
+        message: "Please generate 2FA secret first",
+      });
+    }
+
+    // Verify the code
+    const verified = speakeasy.totp.verify({
+      secret: admin.twoFactorSecret,
+      encoding: "base32",
+      token: code,
+      window: 2,
+    });
+
+    if (!verified) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid verification code",
+      });
+    }
+
+    // Enable 2FA
+    await admin.update({
+      twoFactorEnabled: true,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Two-factor authentication enabled successfully",
+    });
+  } catch (error) {
+    console.error("Enable 2FA error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Disable 2FA
+const disableTwoFactor = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: "Password is required to disable 2FA",
+      });
+    }
+
+    // Find admin
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(password, admin.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid password",
+      });
+    }
+
+    // Disable 2FA
+    await admin.update({
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Two-factor authentication disabled successfully",
+    });
+  } catch (error) {
+    console.error("Disable 2FA error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
 
 module.exports = {
   handleAdminLogin,
@@ -496,4 +807,9 @@ module.exports = {
   getAllHelpseekers,
   getHelpseekerDetails,
   getHelpseekerTasks,
+  updateAdminProfile,
+  changeAdminPassword,
+  generateTwoFactorSecret,
+  enableTwoFactor,
+  disableTwoFactor,
 };

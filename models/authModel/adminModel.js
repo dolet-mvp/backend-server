@@ -43,6 +43,14 @@ const Admin = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    twoFactorEnabled: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    twoFactorSecret: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   },
   {
     tableName: "admins",

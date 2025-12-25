@@ -1,7 +1,55 @@
 const express = require("express");
 const router = express.Router();
 const { checkForAuthenticationCookie, checkUserType } = require("../../middleware/authMiddleware");
-const { getHelperTasks, getHelpseekerTasks } = require("../../controllers/authController/adminAuthController");
+const { 
+  getHelperTasks, 
+  getHelpseekerTasks,
+  updateAdminProfile,
+  changeAdminPassword,
+  generateTwoFactorSecret,
+  enableTwoFactor,
+  disableTwoFactor
+} = require("../../controllers/authController/adminAuthController");
+
+// Update admin profile
+router.put(
+  "/profile/update",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  updateAdminProfile
+);
+
+// Change admin password
+router.put(
+  "/profile/change-password",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  changeAdminPassword
+);
+
+// Generate 2FA secret
+router.post(
+  "/2fa/generate",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  generateTwoFactorSecret
+);
+
+// Enable 2FA
+router.post(
+  "/2fa/enable",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  enableTwoFactor
+);
+
+// Disable 2FA
+router.post(
+  "/2fa/disable",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  disableTwoFactor
+);
 
 // Get all tasks for a specific helper
 router.get(
