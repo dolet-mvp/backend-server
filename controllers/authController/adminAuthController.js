@@ -3,6 +3,7 @@ const Helper = require("../../models/authModel/helperModel");
 const Task = require("../../models/taskModel/taskModel");
 const Helpseeker = require("../../models/authModel/helpseekerModel");
 const { createToken } = require("../../services/authServices");
+const { decryptHelperData } = require("../../services/encryptionService");
 const bcrypt = require("bcryptjs");
 const speakeasy = require("speakeasy");
 const QRCode = require("qrcode");
@@ -104,10 +105,13 @@ const getPendingHelpers = async (req, res) => {
       order: [["createdAt", "ASC"]],
     });
 
+    // Decrypt documents for each helper
+    const decryptedHelpers = helpers.map(helper => decryptHelperData(helper));
+
     res.json({
       success: true,
-      count: helpers.length,
-      helpers,
+      count: decryptedHelpers.length,
+      helpers: decryptedHelpers,
     });
   } catch (error) {
     console.error("Get pending helpers error:", error);
@@ -228,10 +232,13 @@ const getAllHelpers = async (req, res) => {
       order: [["createdAt", "DESC"]],
     });
 
+    // Decrypt documents for each helper
+    const decryptedHelpers = helpers.map(helper => decryptHelperData(helper));
+
     res.json({
       success: true,
       total: count,
-      helpers,
+      helpers: decryptedHelpers,
     });
   } catch (error) {
     console.error("Get all helpers error:", error);
@@ -315,9 +322,12 @@ const getHelperDetails = async (req, res) => {
       });
     }
 
+    // Decrypt documents
+    const decryptedHelper = decryptHelperData(helper);
+
     res.json({
       success: true,
-      helper,
+      helper: decryptedHelper,
     });
   } catch (error) {
     console.error("Get helper details error:", error);

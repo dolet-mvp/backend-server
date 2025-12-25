@@ -1,5 +1,6 @@
 const Helper = require("../../models/authModel/helperModel");
 const { createToken } = require("../../services/authServices");
+const { encryptDocuments } = require("../../services/encryptionService");
 const bcrypt = require("bcryptjs");
 
 const handleHelperRegisterOrLogin = async (req, res) => {
@@ -115,13 +116,20 @@ const handleHelperUploadDocument = async (req, res) => {
       });
     }
 
+    // Encrypt document URLs before storing
+    const encryptedDocs = encryptDocuments({
+      aadharCard: documents.aadharCard,
+      addressProof: documents.addressProof,
+      drivingLicense: documents.drivingLicense
+    });
+
     await helper.update({
       accountNumber,
       ifscCode,
       accountHolderName,
-      aadharCardDocument: documents.aadharCard,
-      addressProofDocument: documents.addressProof,
-      drivingLicenseDocument: documents.drivingLicense,
+      aadharCardDocument: encryptedDocs.aadharCard,
+      addressProofDocument: encryptedDocs.addressProof,
+      drivingLicenseDocument: encryptedDocs.drivingLicense,
       verificationStatus: "submitted",
       isApproved: false,
     });
