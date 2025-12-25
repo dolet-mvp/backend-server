@@ -83,9 +83,9 @@ const decryptHelperData = (helper) => {
   const helperData = helper.toJSON ? helper.toJSON() : helper;
   
   // Decrypt document fields
-  if (helperData.aadharCard) helperData.aadharCard = decrypt(helperData.aadharCard);
-  if (helperData.addressProof) helperData.addressProof = decrypt(helperData.addressProof);
-  if (helperData.drivingLicense) helperData.drivingLicense = decrypt(helperData.drivingLicense);
+  if (helperData.aadharCardDocument) helperData.aadharCardDocument = decrypt(helperData.aadharCardDocument);
+  if (helperData.addressProofDocument) helperData.addressProofDocument = decrypt(helperData.addressProofDocument);
+  if (helperData.drivingLicenseDocument) helperData.drivingLicenseDocument = decrypt(helperData.drivingLicenseDocument);
   
   return helperData;
 };

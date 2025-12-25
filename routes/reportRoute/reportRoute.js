@@ -37,7 +37,7 @@ router.get(
   getAllReports
 );
 
-// Get report statistics
+// Get report statistics (must be before /:reportId)
 router.get(
   "/admin/stats",
   checkForAuthenticationCookie(),

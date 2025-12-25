@@ -20,6 +20,7 @@ const generateTicketId = () => {
 const createTicket = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userType = req.user.userType; // Get user type from authenticated user
     const { title, subject, description, priority, category } = req.body;
 
     // Validation
@@ -40,6 +41,7 @@ const createTicket = async (req, res) => {
     const ticket = await SupportTicket.create({
       ticketId,
       userId,
+      userType,
       title,
       subject,
       description,
@@ -52,6 +54,7 @@ const createTicket = async (req, res) => {
     // Create notification for user (without email)
     await Notification.create({
       userId,
+      userType,
       title: "Support Ticket Created",
       message: `Your support ticket ${ticketId} has been created successfully. Our team will respond soon.`,
       type: "general",
@@ -97,9 +100,22 @@ const getMyTickets = async (req, res) => {
       where,
       include: [
         {
-          model: User,
+          model: Admin,
           as: "assignedAdmin",
           attributes: ["id", "fullName", "email"],
+          required: false,
+        },
+        {
+          model: Helper,
+          as: "helper",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "helpseeker",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
         },
         {
           model: TicketReply,
@@ -108,9 +124,22 @@ const getMyTickets = async (req, res) => {
           order: [["createdAt", "DESC"]],
           include: [
             {
-              model: User,
-              as: "user",
+              model: Helper,
+              as: "helper",
               attributes: ["id", "fullName", "profilePhoto"],
+              required: false,
+            },
+            {
+              model: Helpseeker,
+              as: "helpseeker",
+              attributes: ["id", "fullName", "profilePhoto"],
+              required: false,
+            },
+            {
+              model: Admin,
+              as: "admin",
+              attributes: ["id", "fullName", "profilePhoto"],
+              required: false,
             },
           ],
         },
@@ -149,14 +178,22 @@ const getTicketDetails = async (req, res) => {
       where: isUUID ? { id: ticketId } : { ticketId },
       include: [
         {
-          model: User,
-          as: "user",
-          attributes: ["id", "fullName", "email", "profilePhoto", "role"],
+          model: Helper,
+          as: "helper",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
         },
         {
-          model: User,
+          model: Helpseeker,
+          as: "helpseeker",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Admin,
           as: "assignedAdmin",
           attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
         },
         {
           model: TicketReply,
@@ -168,9 +205,22 @@ const getTicketDetails = async (req, res) => {
           required: false,
           include: [
             {
-              model: User,
-              as: "user",
-              attributes: ["id", "fullName", "email", "profilePhoto", "role"],
+              model: Helper,
+              as: "helper",
+              attributes: ["id", "fullName", "email", "profilePhoto"],
+              required: false,
+            },
+            {
+              model: Helpseeker,
+              as: "helpseeker",
+              attributes: ["id", "fullName", "email", "profilePhoto"],
+              required: false,
+            },
+            {
+              model: Admin,
+              as: "admin",
+              attributes: ["id", "fullName", "email", "profilePhoto"],
+              required: false,
             },
           ],
           order: [["createdAt", "ASC"]],
@@ -226,9 +276,16 @@ const replyToTicket = async (req, res) => {
       where: { ticketId },
       include: [
         {
-          model: User,
-          as: "user",
+          model: Helper,
+          as: "helper",
           attributes: ["id", "fullName", "email"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "helpseeker",
+          attributes: ["id", "fullName", "email"],
+          required: false,
         },
       ],
     });
@@ -258,6 +315,7 @@ const replyToTicket = async (req, res) => {
     const reply = await TicketReply.create({
       ticketId: ticket.id,
       userId,
+      userType: userRole,
       message,
       attachments,
       isAdminReply: userRole === "admin",
@@ -287,9 +345,22 @@ const replyToTicket = async (req, res) => {
     const replyWithUser = await TicketReply.findByPk(reply.id, {
       include: [
         {
-          model: User,
-          as: "user",
-          attributes: ["id", "fullName", "email", "profilePhoto", "role"],
+          model: Helper,
+          as: "helper",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "helpseeker",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Admin,
+          as: "admin",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
         },
       ],
     });
@@ -300,6 +371,7 @@ const replyToTicket = async (req, res) => {
         // Notify ticket creator
         await Notification.create({
           userId: ticket.userId,
+          userType: ticket.userType,
           title: "New Support Response",
           message: `Your ticket ${ticketId} has received a new response from support team.`,
           type: "general",
@@ -363,14 +435,22 @@ const getAllTickets = async (req, res) => {
       where,
       include: [
         {
-          model: User,
-          as: "user",
-          attributes: ["id", "fullName", "email", "profilePhoto", "role"],
+          model: Helper,
+          as: "helper",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
         },
         {
-          model: User,
+          model: Helpseeker,
+          as: "helpseeker",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Admin,
           as: "assignedAdmin",
           attributes: ["id", "fullName", "email"],
+          required: false,
         },
         {
           model: TicketReply,
@@ -432,9 +512,16 @@ const updateTicketStatus = async (req, res) => {
       where: { ticketId },
       include: [
         {
-          model: User,
-          as: "user",
+          model: Helper,
+          as: "helper",
           attributes: ["id", "fullName", "email"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "helpseeker",
+          attributes: ["id", "fullName", "email"],
+          required: false,
         },
       ],
     });
@@ -472,9 +559,10 @@ const updateTicketStatus = async (req, res) => {
     if (status) {
       await Notification.create({
         userId: ticket.userId,
+        userType: ticket.userType,
         title: "Ticket Status Updated",
         message: `Your ticket ${ticketId} status has been updated to: ${status}`,
-        type: "support_ticket",
+        type: "general",
         priority: "medium",
       });
     }

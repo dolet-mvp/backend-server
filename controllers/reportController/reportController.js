@@ -177,6 +177,44 @@ const getAllReports = async (req, res) => {
 
     const reports = await Report.findAll({
       where: whereClause,
+      include: [
+        {
+          model: Helper,
+          as: "reporterHelper",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "reporterHelpseeker",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helper,
+          as: "reportedHelper",
+          attributes: ["id", "fullName", "email", "profilePhoto", "verificationStatus"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "reportedHelpseeker",
+          attributes: ["id", "fullName", "email", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Task,
+          as: "task",
+          attributes: ["id", "title", "status"],
+          required: false,
+        },
+        {
+          model: Admin,
+          as: "reviewer",
+          attributes: ["id", "fullName", "email"],
+          required: false,
+        },
+      ],
       order: [["createdAt", "DESC"]],
     });
 
@@ -203,7 +241,46 @@ const getReportById = async (req, res) => {
   try {
     const { reportId } = req.params;
 
-    const report = await Report.findByPk(reportId);
+    const report = await Report.findByPk(reportId, {
+      include: [
+        {
+          model: Helper,
+          as: "reporterHelper",
+          attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "reporterHelpseeker",
+          attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Helper,
+          as: "reportedHelper",
+          attributes: ["id", "fullName", "email", "phone", "profilePhoto", "verificationStatus"],
+          required: false,
+        },
+        {
+          model: Helpseeker,
+          as: "reportedHelpseeker",
+          attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
+          required: false,
+        },
+        {
+          model: Task,
+          as: "task",
+          attributes: ["id", "title", "status", "description"],
+          required: false,
+        },
+        {
+          model: Admin,
+          as: "reviewer",
+          attributes: ["id", "fullName", "email"],
+          required: false,
+        },
+      ],
+    });
 
     if (!report) {
       return res.status(404).json({
@@ -212,36 +289,9 @@ const getReportById = async (req, res) => {
       });
     }
 
-    // Fetch reporter and reported user details
-    let reporter, reportedUser;
-    
-    if (report.reporterType === "helper") {
-      reporter = await Helper.findByPk(report.reporterId, {
-        attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
-      });
-    } else {
-      reporter = await Helpseeker.findByPk(report.reporterId, {
-        attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
-      });
-    }
-
-    if (report.reportedUserType === "helper") {
-      reportedUser = await Helper.findByPk(report.reportedUserId, {
-        attributes: ["id", "fullName", "email", "phone", "profilePhoto", "verificationStatus"],
-      });
-    } else {
-      reportedUser = await Helpseeker.findByPk(report.reportedUserId, {
-        attributes: ["id", "fullName", "email", "phone", "profilePhoto"],
-      });
-    }
-
     res.status(200).json({
       success: true,
-      data: {
-        report,
-        reporter,
-        reportedUser,
-      },
+      data: report,
     });
   } catch (error) {
     console.error("Get report by ID error:", error);
@@ -311,7 +361,7 @@ const updateReport = async (req, res) => {
         userType: report.reportedUserType,
         title: "Account Action Taken",
         message: `Action has been taken on your account: ${actionTaken.replace(/_/g, " ")}`,
-        type: "account_action",
+        type: "general",
         priority: "high",
       });
     }
@@ -322,7 +372,7 @@ const updateReport = async (req, res) => {
       userType: report.reporterType,
       title: "Report Update",
       message: `Your report has been reviewed and is now ${status}`,
-      type: "report_update",
+      type: "general",
       priority: "medium",
     });
 

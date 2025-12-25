@@ -155,7 +155,7 @@ app.use(
 
 // Report routes
 app.use(
-  "/api/reports",
+  "/api/report",
   reportRoutes
 );
 

@@ -49,15 +49,15 @@ const Helper = sequelize.define(
       allowNull: true,
     },
     aadharCardDocument: {
-      type: DataTypes.STRING, // URL to uploaded Aadhar card
+      type: DataTypes.TEXT, // URL to uploaded Aadhar card (TEXT for encrypted URLs)
       allowNull: true,
     },
     addressProofDocument: {
-      type: DataTypes.STRING, // URL to uploaded address proof
+      type: DataTypes.TEXT, // URL to uploaded address proof (TEXT for encrypted URLs)
       allowNull: true,
     },
     drivingLicenseDocument: {
-      type: DataTypes.STRING, // URL to uploaded driving license
+      type: DataTypes.TEXT, // URL to uploaded driving license (TEXT for encrypted URLs)
       allowNull: true,
     },
     isApproved: {

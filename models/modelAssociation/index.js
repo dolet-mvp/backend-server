@@ -16,6 +16,7 @@ const TicketReply = require("../supportModel/ticketReplyModel");
 const DeviceToken = require("../deviceTokenModel/deviceToken");
 const BlockedUser = require("../blockedUserModel/blockedUserModel");
 const TaskRejection = require("../taskRejectionModel/taskRejectionModel");
+const Report = require("../reportModel/reportModel");
 
 Helper.hasMany(Address, {
   foreignKey: "helperId",
@@ -167,6 +168,38 @@ Admin.hasMany(SupportTicket, {
 SupportTicket.belongsTo(Admin, {
   foreignKey: "assignedAdminId",
   as: "assignedAdmin",
+});
+
+// Helper -> SupportTicket (Polymorphic - userId)
+Helper.hasMany(SupportTicket, {
+  foreignKey: "userId",
+  constraints: false,
+  scope: {
+    userType: "helper",
+  },
+  as: "supportTickets",
+});
+
+SupportTicket.belongsTo(Helper, {
+  foreignKey: "userId",
+  constraints: false,
+  as: "helper",
+});
+
+// Helpseeker -> SupportTicket (Polymorphic - userId)
+Helpseeker.hasMany(SupportTicket, {
+  foreignKey: "userId",
+  constraints: false,
+  scope: {
+    userType: "helpseeker",
+  },
+  as: "supportTickets",
+});
+
+SupportTicket.belongsTo(Helpseeker, {
+  foreignKey: "userId",
+  constraints: false,
+  as: "helpseeker",
 });
 
 
@@ -360,6 +393,54 @@ TicketReply.belongsTo(SupportTicket, {
   as: "ticket",
 });
 
+// Helper -> TicketReply (Polymorphic - userId)
+Helper.hasMany(TicketReply, {
+  foreignKey: "userId",
+  constraints: false,
+  scope: {
+    userType: "helper",
+  },
+  as: "ticketReplies",
+});
+
+TicketReply.belongsTo(Helper, {
+  foreignKey: "userId",
+  constraints: false,
+  as: "helper",
+});
+
+// Helpseeker -> TicketReply (Polymorphic - userId)
+Helpseeker.hasMany(TicketReply, {
+  foreignKey: "userId",
+  constraints: false,
+  scope: {
+    userType: "helpseeker",
+  },
+  as: "ticketReplies",
+});
+
+TicketReply.belongsTo(Helpseeker, {
+  foreignKey: "userId",
+  constraints: false,
+  as: "helpseeker",
+});
+
+// Admin -> TicketReply (Polymorphic - userId)
+Admin.hasMany(TicketReply, {
+  foreignKey: "userId",
+  constraints: false,
+  scope: {
+    userType: "admin",
+  },
+  as: "ticketReplies",
+});
+
+TicketReply.belongsTo(Admin, {
+  foreignKey: "userId",
+  constraints: false,
+  as: "admin",
+});
+
 
 // DeviceToken -> Helper (Many-to-One, Polymorphic)
 DeviceToken.belongsTo(Helper, {
@@ -437,6 +518,97 @@ TaskRejection.belongsTo(Helper, {
   as: "helper",
 });
 
+// Report associations (Polymorphic)
+// Helper as reporter
+Helper.hasMany(Report, {
+  foreignKey: "reporterId",
+  constraints: false,
+  scope: {
+    reporterType: "helper",
+  },
+  as: "reportsCreated",
+});
+
+Report.belongsTo(Helper, {
+  foreignKey: "reporterId",
+  constraints: false,
+  as: "reporterHelper",
+});
+
+// Helper as reported user
+Helper.hasMany(Report, {
+  foreignKey: "reportedUserId",
+  constraints: false,
+  scope: {
+    reportedUserType: "helper",
+  },
+  as: "reportsReceived",
+});
+
+Report.belongsTo(Helper, {
+  foreignKey: "reportedUserId",
+  constraints: false,
+  as: "reportedHelper",
+});
+
+// Helpseeker as reporter
+Helpseeker.hasMany(Report, {
+  foreignKey: "reporterId",
+  constraints: false,
+  scope: {
+    reporterType: "helpseeker",
+  },
+  as: "reportsCreated",
+});
+
+Report.belongsTo(Helpseeker, {
+  foreignKey: "reporterId",
+  constraints: false,
+  as: "reporterHelpseeker",
+});
+
+// Helpseeker as reported user
+Helpseeker.hasMany(Report, {
+  foreignKey: "reportedUserId",
+  constraints: false,
+  scope: {
+    reportedUserType: "helpseeker",
+  },
+  as: "reportsReceived",
+});
+
+Report.belongsTo(Helpseeker, {
+  foreignKey: "reportedUserId",
+  constraints: false,
+  as: "reportedHelpseeker",
+});
+
+// Admin who reviewed the report
+Admin.hasMany(Report, {
+  foreignKey: "reviewedBy",
+  as: "reviewedReports",
+  constraints: false,
+});
+
+Report.belongsTo(Admin, {
+  foreignKey: "reviewedBy",
+  as: "reviewer",
+  constraints: false,
+});
+
+// Task associated with report
+Task.hasMany(Report, {
+  foreignKey: "taskId",
+  as: "reports",
+  constraints: false,
+});
+
+Report.belongsTo(Task, {
+  foreignKey: "taskId",
+  as: "task",
+  constraints: false,
+});
+
 
 module.exports = {
   Helper,
@@ -457,4 +629,5 @@ module.exports = {
   DeviceToken,
   BlockedUser,
   TaskRejection,
+  Report,
 };
