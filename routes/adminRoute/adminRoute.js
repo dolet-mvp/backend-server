@@ -12,6 +12,7 @@ const {
   getHelperAnalytics,
   getHelpseekerAnalytics
 } = require("../../controllers/authController/adminAuthController");
+const { getAllPendingDeliveries } = require("../../controllers/taskController/taskDeliveryController");
 
 // Update admin profile
 router.put(
@@ -51,6 +52,14 @@ router.post(
   checkForAuthenticationCookie(),
   checkUserType("admin"),
   disableTwoFactor
+);
+
+// Get pending task deliveries (monitoring)
+router.get(
+  "/tasks/pending-deliveries",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  getAllPendingDeliveries
 );
 
 // Get helper analytics

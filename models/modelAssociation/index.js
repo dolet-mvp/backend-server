@@ -17,6 +17,7 @@ const DeviceToken = require("../deviceTokenModel/deviceToken");
 const BlockedUser = require("../blockedUserModel/blockedUserModel");
 const TaskRejection = require("../taskRejectionModel/taskRejectionModel");
 const Report = require("../reportModel/reportModel");
+const TaskDeliveryAcknowledgment = require("../taskModel/taskDeliveryAcknowledgmentModel");
 
 Helper.hasMany(Address, {
   foreignKey: "helperId",
@@ -609,6 +610,28 @@ Report.belongsTo(Task, {
   constraints: false,
 });
 
+// Task -> TaskDeliveryAcknowledgment (One-to-Many)
+Task.hasMany(TaskDeliveryAcknowledgment, {
+  foreignKey: "taskId",
+  as: "deliveryAcknowledgments",
+});
+
+TaskDeliveryAcknowledgment.belongsTo(Task, {
+  foreignKey: "taskId",
+  as: "task",
+});
+
+// Helper -> TaskDeliveryAcknowledgment (One-to-Many)
+Helper.hasMany(TaskDeliveryAcknowledgment, {
+  foreignKey: "helperId",
+  as: "taskDeliveries",
+});
+
+TaskDeliveryAcknowledgment.belongsTo(Helper, {
+  foreignKey: "helperId",
+  as: "helper",
+});
+
 
 module.exports = {
   Helper,
@@ -630,4 +653,5 @@ module.exports = {
   BlockedUser,
   TaskRejection,
   Report,
+  TaskDeliveryAcknowledgment,
 };

@@ -13,6 +13,7 @@ const initDB = (callback) => {
       // Load all other models
       require('../models/addressModel/addressModel');
       require('../models/taskModel/taskModel');
+      require('../models/taskModel/taskDeliveryAcknowledgmentModel');
       require('../models/bidModel/bidModel');
       require('../models/paymentModel/paymentModel');
       require('../models/ratingModel/ratingModel');

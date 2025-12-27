@@ -168,7 +168,7 @@ const createTask = async (req, res) => {
   }
 };
 
-const publishTask = async (req, res) => {
+const   publishTask = async (req, res) => {
   const publishStartTime = Date.now();
   let transaction;
   try {
@@ -218,7 +218,7 @@ const publishTask = async (req, res) => {
 
     // Ensure only one queue row per task inside the same transaction
     await TaskQueue.destroy({ where: { taskId: task.id }, transaction });
-
+//remove ----check
     const queueEntry = await TaskQueue.create({
       taskId: task.id,
       queuePosition: queueCount + 1,
@@ -310,7 +310,7 @@ const publishTask = async (req, res) => {
                 const helper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
                 const helperId = helper.id;
                 
-                // Check if helper already acted on this task
+                // Check if helper already acted on this task  --check
                 const actionsData = await redis.get(`task:${task.id}:actions`);
                 if (actionsData) {
                   const actions = typeof actionsData === 'string' ? JSON.parse(actionsData) : actionsData;
@@ -461,7 +461,7 @@ const publishTask = async (req, res) => {
                   // Associate task with closest helper
                   await redis.setex(
                     `task:${task.id}:associated_helpers`,
-                    2592000,
+                    780,
                     JSON.stringify([closestHelper.helperId])
                   );
                   
@@ -1055,8 +1055,8 @@ const getNearbyHelpers = async (req, res) => {
         console.log(`⚠️  Helper ${helper.fullName || helper.id} has invalid coordinates, skipping`);
         continue;
       }
-
-      helperLocations.push({ lat: helperLat, lng: helperLng });
+//await ---check
+     helperLocations.push({ lat: helperLat, lng: helperLng });
       helperData.push({
         id: helper.id,
         fullName: helper.fullName,
@@ -1125,7 +1125,7 @@ const getNearbyHelpers = async (req, res) => {
 
       debugInfo.withinRadius++;
       console.log(`   ✅ Within radius!`);
-
+//await --check
       nearbyHelpers.push({
         id: helper.id,
         fullName: helper.fullName,

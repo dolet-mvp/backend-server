@@ -604,7 +604,6 @@ const toggleAvailability = async (req, res) => {
               taskIds = associatedTasksData;
             }
           }
-          
           console.log(`⏱️ [OFFLINE-PERF] Helper has ${taskIds.length} associated task(s) - fetched in ${Date.now() - startTime}ms`);
           
           if (taskIds.length === 0) {

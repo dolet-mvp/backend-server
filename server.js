@@ -6,6 +6,7 @@ const initDB = require("./dbConnection/dbSync");
 const { initTaskScheduler } = require("./services/taskSchedulerService");
 const { initSocketServer } = require("./services/socketService");
 const { initializeFirebase } = require("./services/pushNotificationService");
+const { processRetryQueue } = require("./services/taskDeliveryService");
 
 const PORT = process.env.PORT || 8181;
 const app = express();
@@ -205,5 +206,16 @@ initDB(() => {
     console.log(`Server is running on port ${PORT}`);
     initTaskScheduler();
     console.log(' Task scheduler initialized');
+    
+    // Initialize task delivery retry processor
+    const RETRY_INTERVAL = 2000; // Process every 2 seconds
+    setInterval(async () => {
+      try {
+        await processRetryQueue();
+      } catch (error) {
+        console.error('❌ [RETRY] Error processing retry queue:', error);
+      }
+    }, RETRY_INTERVAL);
+    console.log(`✅ Task delivery retry processor initialized (interval: ${RETRY_INTERVAL}ms)`);
   });
 });

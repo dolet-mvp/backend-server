@@ -28,7 +28,7 @@ const initSocketServer = (server) => {
           process.env.FRONTEND_URL,
           process.env.FRONTEND_URL_2,
           process.env.FRONTEND_URL_3,
-          'https://dolet.pixbit.me', // Production domain
+          'https://api.letsdolet.com', // Production domain
           'http://dolet.pixbit.me', // HTTP variant
         ].filter(Boolean);
 
@@ -63,11 +63,11 @@ const initSocketServer = (server) => {
       credentials: true,
       methods: ["GET", "POST"],
     },
-    // Try polling first for better compatibility with proxies/HTTPS
-    transports: ["polling", "websocket"],
+    // Force WebSocket-only for Android reliability (no polling)
+    transports: ["websocket"],
     allowEIO3: true, // Allow Engine.IO v3 clients
-    pingTimeout: 60000,
-    pingInterval: 25000,
+    pingTimeout: 60000, // Extended for mobile latency
+    pingInterval: 25000, // Increased for mobile networks
     upgradeTimeout: 30000,
     maxHttpBufferSize: 1e6,
     // Path configuration
@@ -76,6 +76,15 @@ const initSocketServer = (server) => {
   
   console.log('✅ [SOCKET SERVER] Socket.IO server configured');
   console.log('📋 [SOCKET SERVER] Allowed origins:', process.env.FRONTEND_URL, process.env.FRONTEND_URL_2);
+
+  // Debug connection errors for Android troubleshooting
+  io.engine.on("connection_error", (err) => {
+    console.error('❌ [SOCKET SERVER] Connection error:', {
+      code: err.code,
+      message: err.message,
+      context: err.context,
+    });
+  });
 
   // Authentication middleware for socket connections
   io.use((socket, next) => {
@@ -763,6 +772,7 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
     const io = getIO();
     const redis = require("../config/redis/redis");
     const { calculateDistance, getGoogleMapsDistances } = require("../controllers/taskController/helperTaskController");
+    const { attemptTaskDelivery } = require("./taskDeliveryService");
     
     console.log(`🚀 [SOCKET BROADCAST] Starting broadcast for new task`, {
       taskId: taskData.taskId || taskData.id,
@@ -843,74 +853,88 @@ const broadcastNewJobToSearchingHelpers = async (taskData) => {
             eligibleHelpers++;
             console.log(`✅ [SOCKET BROADCAST] Helper ${helperId} is eligible for task ${taskId}`);
             
-            // If helper not in search (no location), send basic notification
-            if (!latitude || !longitude) {
-              const jobPayload = {
-                ...taskData,
-                distance: null,
-                distanceText: 'N/A',
-                durationText: 'N/A',
-              };
-              
-              console.log(`📤 [SOCKET BROADCAST] Emitting basic notification to helper ${helperId} (not in search)`);
-              socket.emit("newJobAvailable", jobPayload);
-              broadcastCount++;
-              console.log(`📤 [SOCKET BROADCAST] ✅ Sent new job ${taskId} to helper ${helperId} (no distance calc)`);
-              continue;
-            }
-            
-            // Calculate distance for helpers in search mode
-            const distance = calculateDistance(latitude, longitude, taskLat, taskLng);
-            console.log(`📏 [SOCKET BROADCAST] Distance: ${distance.toFixed(2)}km (max: ${radius}km)`);
-
-            if (distance <= radius) {
-              // Get Google Maps distance for accurate info
-              let distanceInfo = {
-                distance: parseFloat(distance.toFixed(2)),
-                distanceText: `${distance.toFixed(1)} km`,
-                durationText: 'N/A',
-                source: 'haversine'
-              };
-
-              try {
-                const googleDistances = await getGoogleMapsDistances(
-                  { lat: latitude, lng: longitude },
-                  [{ lat: taskLat, lng: taskLng }]
-                );
-
-                if (googleDistances && googleDistances[0] && googleDistances[0].status === 'OK') {
-                  const gDistance = googleDistances[0].distance;
-                  const gDuration = googleDistances[0].duration;
-                  
-                  distanceInfo = {
-                    distance: parseFloat(gDistance.toFixed(2)),
-                    distanceText: gDistance < 1 ? `${Math.round(gDistance * 1000)} m` : `${gDistance.toFixed(1)} km`,
-                    durationText: gDuration < 60 ? `${Math.round(gDuration)} mins` : `${Math.floor(gDuration / 60)} hr ${Math.round(gDuration % 60)} mins`,
-                    duration: gDuration * 60,
-                    source: 'google_maps'
-                  };
-                }
-              } catch (error) {
-                console.warn(`⚠️ [SOCKET BROADCAST] Google Maps failed for helper ${helperId}, using haversine`);
+            // Use the new delivery service for reliable delivery
+            try {
+              const deliveryResult = await attemptTaskDelivery(taskId, helperId, taskData, 0);
+              if (deliveryResult.success) {
+                broadcastCount++;
+                console.log(`✅ [SOCKET BROADCAST] Task delivery initiated for helper ${helperId}`);
+              } else {
+                console.warn(`⚠️ [SOCKET BROADCAST] Task delivery failed for helper ${helperId}`);
               }
-
-              // Send new job to this helper
-              const jobPayload = {
-                ...taskData,
-                ...distanceInfo
-              };
+            } catch (deliveryError) {
+              console.error(`❌ [SOCKET BROADCAST] Delivery error for helper ${helperId}:`, deliveryError.message);
               
-              console.log(`📤 [SOCKET BROADCAST] Emitting to socket ${socketId}`);
-              console.log(`📤 [SOCKET BROADCAST] Helper ID: ${helperId}`);
-              console.log(`📤 [SOCKET BROADCAST] Event: newJobAvailable`);
-              console.log(`📤 [SOCKET BROADCAST] Payload:`, JSON.stringify(jobPayload, null, 2));
+              // Fallback to original delivery method
+              // If helper not in search (no location), send basic notification
+              if (!latitude || !longitude) {
+                const jobPayload = {
+                  ...taskData,
+                  distance: null,
+                  distanceText: 'N/A',
+                  durationText: 'N/A',
+                };
+                
+                console.log(`📤 [SOCKET BROADCAST] Emitting basic notification to helper ${helperId} (not in search)`);
+                socket.emit("newJobAvailable", jobPayload);
+                broadcastCount++;
+                console.log(`📤 [SOCKET BROADCAST] ✅ Sent new job ${taskId} to helper ${helperId} (no distance calc)`);
+                continue;
+              }
               
-              socket.emit("newJobAvailable", jobPayload);
+              // Calculate distance for helpers in search mode
+              const distance = calculateDistance(latitude, longitude, taskLat, taskLng);
+              console.log(`📏 [SOCKET BROADCAST] Distance: ${distance.toFixed(2)}km (max: ${radius}km)`);
 
-              broadcastCount++;
-              console.log(`📤 [SOCKET BROADCAST] ✅ Sent new job ${taskId} to helper ${helperId} via socket ${socketId} (${distanceInfo.distanceText} away)`);
-            } else {
-              console.log(`⚠️ [SOCKET BROADCAST] Helper ${helperId} is ${distance.toFixed(2)}km away (outside ${radius}km radius)`);
+              if (distance <= radius) {
+                // Get Google Maps distance for accurate info
+                let distanceInfo = {
+                  distance: parseFloat(distance.toFixed(2)),
+                  distanceText: `${distance.toFixed(1)} km`,
+                  durationText: 'N/A',
+                  source: 'haversine'
+                };
+
+                try {
+                  const googleDistances = await getGoogleMapsDistances(
+                    { lat: latitude, lng: longitude },
+                    [{ lat: taskLat, lng: taskLng }]
+                  );
+
+                  if (googleDistances && googleDistances[0] && googleDistances[0].status === 'OK') {
+                    const gDistance = googleDistances[0].distance;
+                    const gDuration = googleDistances[0].duration;
+                    
+                    distanceInfo = {
+                      distance: parseFloat(gDistance.toFixed(2)),
+                      distanceText: gDistance < 1 ? `${Math.round(gDistance * 1000)} m` : `${gDistance.toFixed(1)} km`,
+                      durationText: gDuration < 60 ? `${Math.round(gDuration)} mins` : `${Math.floor(gDuration / 60)} hr ${Math.round(gDuration % 60)} mins`,
+                      duration: gDuration * 60,
+                      source: 'google_maps'
+                    };
+                  }
+                } catch (error) {
+                  console.warn(`⚠️ [SOCKET BROADCAST] Google Maps failed for helper ${helperId}, using haversine`);
+                }
+
+                // Send new job to this helper
+                const jobPayload = {
+                  ...taskData,
+                  ...distanceInfo
+                };
+                
+                console.log(`📤 [SOCKET BROADCAST] Emitting to socket ${socketId}`);
+                console.log(`📤 [SOCKET BROADCAST] Helper ID: ${helperId}`);
+                console.log(`📤 [SOCKET BROADCAST] Event: newJobAvailable`);
+                console.log(`📤 [SOCKET BROADCAST] Payload:`, JSON.stringify(jobPayload, null, 2));
+                
+                socket.emit("newJobAvailable", jobPayload);
+
+                broadcastCount++;
+                console.log(`📤 [SOCKET BROADCAST] ✅ Sent new job ${taskId} to helper ${helperId} via socket ${socketId} (${distanceInfo.distanceText} away)`);
+              } else {
+                console.log(`⚠️ [SOCKET BROADCAST] Helper ${helperId} is ${distance.toFixed(2)}km away (outside ${radius}km radius)`);
+              }
             }
           } else {
             console.log(`⚠️ [SOCKET BROADCAST] Task ${taskId} not in helper ${helperId}'s associated tasks`);

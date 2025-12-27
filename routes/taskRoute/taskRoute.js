@@ -9,6 +9,11 @@ const {
   getMostPopularJobsInArea,
 } = require("../../controllers/taskController/commonTaskController");
 
+const {
+  acknowledgeTaskReceipt,
+  getTaskDeliveryStatus,
+} = require("../../controllers/taskController/taskDeliveryController");
+
 router.get(
   "/popular-jobs",
   checkForAuthenticationCookie(),
@@ -18,6 +23,21 @@ router.get(
 
 router.use("/", helpseekerRoutes);
 router.use("/", helperRoutes);
+
+// Task delivery acknowledgment routes
+router.post(
+  "/:taskId/acknowledge",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  acknowledgeTaskReceipt
+);
+
+router.get(
+  "/:taskId/delivery-status",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper"]),
+  getTaskDeliveryStatus
+);
 
 router.get(
   "/:taskId",
