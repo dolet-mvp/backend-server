@@ -1046,6 +1046,24 @@ const rejectTask = async (req, res) => {
                 }
                 
                 console.log(`✅ Task ${taskId} reassigned to replacement helper ${replacementHelperId}`);
+                
+                // Use delivery service for reliable task delivery to replacement helper
+                console.log(`📡 [REJECT->REASSIGN] Delivering task ${taskId} to replacement helper ${replacementHelperId}...`);
+                const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
+                
+                try {
+                  const taskDataStr = await redis.get(`job:${taskId}`);
+                  if (taskDataStr) {
+                    const taskData = typeof taskDataStr === 'string' ? JSON.parse(taskDataStr) : taskDataStr;
+                    const deliveryResult = await attemptTaskDelivery(taskId, replacementHelperId, taskData, 1);
+                    
+                    if (deliveryResult.success) {
+                      console.log(`✅ [REJECT->REASSIGN] Task delivery initiated to replacement helper`);
+                    }
+                  }
+                } catch (deliveryError) {
+                  console.error(`❌ [REJECT->REASSIGN] Delivery error:`, deliveryError.message);
+                }
               } else {
                 console.log(`⚠️ No replacement helper found for task ${taskId}`);
               }
@@ -1650,6 +1668,24 @@ const passTask = async (req, res) => {
               } else {
                 console.log(`⚠️ No replacement helper found for task ${taskId}`);
               }
+            }
+            
+            // Use delivery service for reliable task delivery to replacement helper
+            console.log(`📡 [PASS->REASSIGN] Delivering task ${taskId} to replacement helper ${replacementHelperId}...`);
+            const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
+            
+            try {
+              const taskDataStr = await redis.get(`job:${taskId}`);
+              if (taskDataStr) {
+                const taskData = typeof taskDataStr === 'string' ? JSON.parse(taskDataStr) : taskDataStr;
+                const deliveryResult = await attemptTaskDelivery(taskId, replacementHelperId, taskData, 1);
+                
+                if (deliveryResult.success) {
+                  console.log(`✅ [PASS->REASSIGN] Task delivery initiated to replacement helper`);
+                }
+              }
+            } catch (deliveryError) {
+              console.error(`❌ [PASS->REASSIGN] Delivery error:`, deliveryError.message);
             }
             
             // Now find other available tasks and associate them with this helper
