@@ -247,7 +247,9 @@ const processRetryQueue = async () => {
 
     for (const member of dueRetries) {
       try {
-        const { taskId, helperId, attemptNumber } = JSON.parse(member);
+        // Handle both string and object from Upstash Redis
+        const memberData = typeof member === 'string' ? JSON.parse(member) : member;
+        const { taskId, helperId, attemptNumber } = memberData;
 
         // Check if still needs retry (not acknowledged)
         const deliveryRecord = await TaskDeliveryAcknowledgment.findOne({
