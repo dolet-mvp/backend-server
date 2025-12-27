@@ -63,8 +63,11 @@ const initSocketServer = (server) => {
       credentials: true,
       methods: ["GET", "POST"],
     },
+    // TEMPORARY: Allow both transports until Nginx WebSocket config is verified
+    // After Nginx is properly configured, change to: ["websocket"]
+    transports: ["polling", "websocket"],
     // Force WebSocket-only for Android reliability (no polling)
-    transports: ["websocket"],
+    // transports: ["websocket"],
     allowEIO3: true, // Allow Engine.IO v3 clients
     pingTimeout: 60000, // Extended for mobile latency
     pingInterval: 25000, // Increased for mobile networks
