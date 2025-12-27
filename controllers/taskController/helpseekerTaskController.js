@@ -1733,37 +1733,43 @@ const increaseReward = async (req, res) => {
                 console.log(`✅ [REWARD INCREASE] Task ${task.id} re-associated with helper ${closestHelper.helperId} (${closestHelper.distance.toFixed(2)}km)`);
                 console.log(`⏱️ [REWARD INCREASE] Total reassociation time: ${Date.now() - startTime}ms`);
                 
-                // Broadcast to helpers via socket
-                try {
-                  await socketService.broadcastNewJobToSearchingHelpers(jobData);
-                  console.log(`📡 [REWARD INCREASE] Broadcasted updated job to helpers`);
-                } catch (socketError) {
-                  console.error(`⚠️ [REWARD INCREASE] Failed to broadcast job:`, socketError.message);
-                }
+                // Use delivery service for reliable task delivery with retry and acknowledgment
+                console.log(`📡 [REWARD INCREASE] Delivering updated task ${task.id} to helper ${closestHelper.helperId}...`);
+                const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
                 
-                // Also notify the associated helper specifically about reward increase
                 try {
-                  const io = socketService.getIO();
-                  const helperSocketEntry = Array.from(socketService.connectedUsers.entries()).find(
-                    ([socketId, user]) => user.userId === closestHelper.helperId && user.userType === 'helper'
-                  );
+                  const deliveryResult = await attemptTaskDelivery(task.id, closestHelper.helperId, jobData, 1);
                   
-                  if (helperSocketEntry) {
-                    const socketId = helperSocketEntry[0];
-                    const socket = io.sockets.sockets.get(socketId);
-                    if (socket) {
-                      socket.emit('taskRewardIncreased', {
-                        taskId: task.id,
-                        oldBudget: parseFloat(oldBudget),
-                        newBudget: parseFloat(task.budget),
-                        increase: parseFloat(task.budget) - parseFloat(oldBudget),
-                        title: task.title,
-                      });
-                      console.log(`💰 [REWARD INCREASE] Notified helper ${closestHelper.helperId} via socket about reward increase`);
+                  if (deliveryResult.success) {
+                    console.log(`✅ [REWARD INCREASE] Task delivery initiated to helper with retry mechanism`);
+                    
+                    // Also send specific reward increase notification
+                    try {
+                      const io = socketService.getIO();
+                      const helperSocketEntry = Array.from(socketService.connectedUsers.entries()).find(
+                        ([socketId, user]) => user.userId === closestHelper.helperId && user.userType === 'helper'
+                      );
+                      
+                      if (helperSocketEntry) {
+                        const socketId = helperSocketEntry[0];
+                        const socket = io.sockets.sockets.get(socketId);
+                        if (socket) {
+                          socket.emit('taskRewardIncreased', {
+                            taskId: task.id,
+                            oldBudget: parseFloat(oldBudget),
+                            newBudget: parseFloat(task.budget),
+                            increase: parseFloat(task.budget) - parseFloat(oldBudget),
+                            title: task.title,
+                          });
+                          console.log(`💰 [REWARD INCREASE] Notified helper ${closestHelper.helperId} via socket about reward increase`);
+                        }
+                      }
+                    } catch (notifyError) {
+                      console.error(`⚠️ [REWARD INCREASE] Failed to send reward notification:`, notifyError.message);
                     }
                   }
-                } catch (notifyError) {
-                  console.error(`⚠️ [REWARD INCREASE] Failed to notify helper via socket:`, notifyError.message);
+                } catch (deliveryError) {
+                  console.error(`❌ [REWARD INCREASE] Delivery error:`, deliveryError.message);
                 }
               }
             }
