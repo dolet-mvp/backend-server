@@ -677,7 +677,14 @@ const emitToUser = (userId, userType, event, data) => {
  * @returns {boolean} - True if user is connected
  */
 const isUserConnected = (userId) => {
-  return connectedUsers.has(userId);
+  // connectedUsers is Map of socketId -> {userId, userType, socketId}
+  // Need to search through values to find matching userId
+  for (const [socketId, userData] of connectedUsers.entries()) {
+    if (userData.userId === userId) {
+      return true;
+    }
+  }
+  return false;
 };
 
 /**

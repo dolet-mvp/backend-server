@@ -1,6 +1,8 @@
 const Helper = require("../models/authModel/helperModel");
 const Notification = require("../models/notificationModel/notificationModel");
 const { Op } = require("sequelize");
+const { attemptTaskDelivery } = require("./taskDeliveryService");
+const redis = require("../config/redis/redis");
 
 /**
  * Calculate distance between two coordinates using Haversine formula
@@ -94,6 +96,8 @@ const startJobMatching = async (taskData) => {
     // Sort by distance (closest first)
     matchingHelpers.sort((a, b) => a.distance - b.distance);
 
+    console.log(`📍 [JOB MATCHING] Found ${matchingHelpers.length} helpers within ${MAX_DISTANCE_KM}km for task ${taskId}`);
+
     // Create notifications for matching helpers
     const notificationPromises = matchingHelpers.map(({ helper, distance }) => {
       return Notification.create({
@@ -112,8 +116,33 @@ const startJobMatching = async (taskData) => {
 
     await Promise.all(notificationPromises);
 
+    // Get task data from Redis for delivery
+    let taskData;
+    try {
+      const taskDataStr = await redis.get(`job:${taskId}`);
+      taskData = taskDataStr ? (typeof taskDataStr === 'string' ? JSON.parse(taskDataStr) : taskDataStr) : null;
+    } catch (redisErr) {
+      console.error(`❌ [JOB MATCHING] Failed to get task ${taskId} from Redis:`, redisErr);
+    }
+
+    // Send real-time socket notifications to all matching helpers using delivery service
+    if (taskData) {
+      console.log(`📤 [JOB MATCHING] Delivering task ${taskId} to ${matchingHelpers.length} helpers...`);
+      
+      const deliveryPromises = matchingHelpers.map(({ helper, distance }) => {
+        return attemptTaskDelivery(taskId, helper.id, taskData, 1).catch(err => {
+          console.error(`❌ [JOB MATCHING] Failed to deliver task ${taskId} to helper ${helper.id}:`, err);
+        });
+      });
+
+      await Promise.all(deliveryPromises);
+      console.log(`✅ [JOB MATCHING] Task delivery initiated for ${matchingHelpers.length} helpers`);
+    } else {
+      console.warn(`⚠️ [JOB MATCHING] Task ${taskId} not found in Redis, skipping real-time delivery`);
+    }
+
     console.log(
-      `Job matching completed for task ${taskId}: ${matchingHelpers.length} helpers notified`
+      `✅ [JOB MATCHING] Job matching completed for task ${taskId}: ${matchingHelpers.length} helpers notified`
     );
 
     return {
