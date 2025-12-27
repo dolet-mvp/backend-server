@@ -123,11 +123,11 @@ const attemptTaskDelivery = async (taskId, helperId, taskData, attemptNumber = 0
       deliveryResults.socket = false;
     }
 
-    // Only send push notification if helper is NOT actively in job search mode
-    // If they're on SearchJobScreen (helperInJobSearch=true), socket is enough
-    if (!helperInJobSearch) {
+    // Only send push notification if socket delivery failed OR helper not connected
+    // Socket delivery is primary; push is backup for offline/background scenarios
+    if (!deliveryResults.socket) {
       try {
-        console.log(`📲 [DELIVERY] Sending push notification to helper ${helperId} (not in job search mode)...`);
+        console.log(`📲 [DELIVERY] Sending push notification to helper ${helperId} (socket unavailable)...`);
         await sendToUser(
           helperId,
           "helper",
@@ -150,7 +150,7 @@ const attemptTaskDelivery = async (taskId, helperId, taskData, attemptNumber = 0
         deliveryResults.push = false;
       }
     } else {
-      console.log(`⏭️ [DELIVERY] Skipping push notification (helper actively in job search mode)`);
+      console.log(`⏭️ [DELIVERY] Skipping push notification (socket delivery succeeded)`);
       deliveryResults.push = false;
     }
 
