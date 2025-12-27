@@ -1,6 +1,6 @@
 const TaskDeliveryAcknowledgment = require("../models/taskModel/taskDeliveryAcknowledgmentModel");
 const { sendToUser } = require("./pushNotificationService");
-const { emitToUser, isUserConnected } = require("./socketService");
+const { emitToUser, isUserConnected, getIO, connectedUsers } = require("./socketService");
 const redis = require("../config/redis/redis");
 
 
