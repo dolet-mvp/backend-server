@@ -75,6 +75,13 @@ const attemptTaskDelivery = async (taskId, helperId, taskData, attemptNumber = 0
       lastAttemptAt: new Date(),
     });
 
+    // Double-check acknowledgment status right before sending (race condition protection)
+    await deliveryRecord.reload();
+    if (deliveryRecord.deliveryStatus === "acknowledged") {
+      console.log(`✅ [DELIVERY] Task ${taskId} acknowledged during delivery attempt - skipping notifications`);
+      return { success: true, acknowledged: true };
+    }
+
     // Try socket delivery if helper is connected
     let helperInJobSearch = false;
     try {
