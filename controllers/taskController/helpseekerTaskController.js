@@ -1508,6 +1508,13 @@ const increaseReward = async (req, res) => {
     console.log(`🧹 [REWARD INCREASE] Clearing all helper actions for task ${taskId}`);
     await redis.del(`task:${taskId}:actions`);
 
+    // Clear task delivery acknowledgments so helpers can receive the updated task
+    console.log(`🧹 [REWARD INCREASE] Clearing delivery acknowledgments for task ${taskId}`);
+    const TaskDeliveryAcknowledgment = require('../../models/taskModel/taskDeliveryAcknowledgmentModel');
+    await TaskDeliveryAcknowledgment.destroy({
+      where: { task_id: taskId }
+    });
+
     // Clear existing helper associations for this task
     console.log(`🧹 [REWARD INCREASE] Clearing existing helper associations for task ${taskId}`);
     const existingAssociatedHelpers = await redis.get(`task:${taskId}:associated_helpers`);
