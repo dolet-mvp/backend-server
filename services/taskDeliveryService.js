@@ -6,7 +6,6 @@ const redis = require("../config/redis/redis");
 
 const RETRY_DELAYS = [2000, 5000, 8000, 15000, 30000]; // in milliseconds
 const MAX_RETRY_ATTEMPTS = RETRY_DELAYS.length;
-my 
 /**
  * Create initial delivery tracking record for a task-helper pair
  */
@@ -234,10 +233,10 @@ const processRetryQueue = async () => {
   try {
     const now = Date.now();
     
-    // Get tasks that are due for retry
-    const dueRetries = await redis.zrangebyscore("task:delivery:retry_queue", 0, now);
+    // Get tasks that are due for retry (Upstash Redis REST API compatible)
+    const dueRetries = await redis.zrange("task:delivery:retry_queue", 0, now, { byScore: true });
 
-    if (dueRetries.length === 0) {
+    if (!dueRetries || dueRetries.length === 0) {
       return { processed: 0 };
     }
 

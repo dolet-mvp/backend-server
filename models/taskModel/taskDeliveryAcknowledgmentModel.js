@@ -78,22 +78,23 @@ const TaskDeliveryAcknowledgment = sequelize.define(
   {
     tableName: "task_delivery_acknowledgments",
     timestamps: true,
+    underscored: true, // Convert camelCase to snake_case in database
     indexes: [
       {
-        fields: ["taskId", "helperId"],
+        fields: ["task_id", "helper_id"],
         unique: true,
       },
       {
-        fields: ["deliveryStatus"],
+        fields: ["delivery_status"],
       },
       {
-        fields: ["nextRetryAt"],
+        fields: ["next_retry_at"],
       },
       {
-        fields: ["taskId"],
+        fields: ["task_id"],
       },
       {
-        fields: ["helperId"],
+        fields: ["helper_id"],
       },
     ],
   }
