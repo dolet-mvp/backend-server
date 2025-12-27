@@ -99,28 +99,33 @@ const attemptTaskDelivery = async (taskId, helperId, taskData, attemptNumber = 0
       deliveryResults.socket = false;
     }
 
-    // Try push notification delivery
-    try {
-      console.log(`📲 [DELIVERY] Sending push notification to helper ${helperId}...`);
-      await sendToUser(
-        helperId,
-        "helper",
-        {
-          title: "New Task Available Near You!",
-          body: `${taskData.title} - ₹${taskData.budget}`,
-        },
-        {
-          type: "task_available",
-          taskId: taskId.toString(),
-          requiresAcknowledgment: "true",
-          deliveryAttempt: deliveryRecord.attemptCount.toString(),
-          deliveryRecordId: deliveryRecord.id.toString(),
-        }
-      );
-      deliveryResults.push = true;
-      console.log(`✅ [DELIVERY] Push notification sent to helper ${helperId}`);
-    } catch (pushError) {
-      console.error(`❌ [DELIVERY] Push notification failed:`, pushError.message);
+    // Only send push notification if socket delivery failed
+    if (!deliveryResults.socket) {
+      try {
+        console.log(`📲 [DELIVERY] Sending push notification to helper ${helperId} (socket failed)...`);
+        await sendToUser(
+          helperId,
+          "helper",
+          {
+            title: "New Task Available Near You!",
+            body: `${taskData.title} - ₹${taskData.budget}`,
+          },
+          {
+            type: "task_available",
+            taskId: taskId.toString(),
+            requiresAcknowledgment: "true",
+            deliveryAttempt: deliveryRecord.attemptCount.toString(),
+            deliveryRecordId: deliveryRecord.id.toString(),
+          }
+        );
+        deliveryResults.push = true;
+        console.log(`✅ [DELIVERY] Push notification sent to helper ${helperId}`);
+      } catch (pushError) {
+        console.error(`❌ [DELIVERY] Push notification failed:`, pushError.message);
+        deliveryResults.push = false;
+      }
+    } else {
+      console.log(`⏭️ [DELIVERY] Skipping push notification (socket delivery succeeded)`);
       deliveryResults.push = false;
     }
 
@@ -203,11 +208,15 @@ const acknowledgeTaskDelivery = async (taskId, helperId, metadata = {}) => {
     try {
       const retryQueueMembers = await redis.zrange("task:delivery:retry_queue", 0, -1);
       for (const member of retryQueueMembers) {
-        const data = JSON.parse(member);
-        if (data.taskId === taskId && data.helperId === helperId) {
-          await redis.zrem("task:delivery:retry_queue", member);
-          console.log(`🗑️ [DELIVERY] Removed from retry queue: task ${taskId} -> helper ${helperId}`);
-          break;
+        try {
+          const data = typeof member === 'string' ? JSON.parse(member) : member;
+          if (data.taskId === taskId && data.helperId === helperId) {
+            await redis.zrem("task:delivery:retry_queue", typeof member === 'string' ? member : JSON.stringify(member));
+            console.log(`🗑️ [DELIVERY] Removed from retry queue: task ${taskId} -> helper ${helperId}`);
+            break;
+          }
+        } catch (parseError) {
+          console.warn(`⚠️ [DELIVERY] Failed to parse retry queue member:`, parseError.message);
         }
       }
     } catch (redisError) {
