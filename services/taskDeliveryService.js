@@ -73,11 +73,25 @@ const attemptTaskDelivery = async (taskId, helperId, taskData, attemptNumber = 0
     });
 
     // Try socket delivery if helper is connected
+    let helperInJobSearch = false;
     try {
       const isConnected = isUserConnected(helperId);
       console.log(`🔌 [DELIVERY] Helper ${helperId} connection status: ${isConnected ? 'CONNECTED' : 'NOT CONNECTED'}`);
 
       if (isConnected) {
+        // Check if helper is actively in job search mode
+        const io = getIO();
+        const socketEntry = Array.from(connectedUsers.entries()).find(
+          ([socketId, user]) => user.userId === helperId && user.userType === 'helper'
+        );
+        
+        if (socketEntry) {
+          const [socketId] = socketEntry;
+          const socket = io.sockets.sockets.get(socketId);
+          helperInJobSearch = socket?.jobSearchData?.readyToReceive || false;
+          console.log(`🔍 [DELIVERY] Helper in job search mode: ${helperInJobSearch ? 'YES' : 'NO'}`);
+        }
+        
         console.log(`📡 [DELIVERY] Sending task via socket to helper ${helperId}...`);
         
         // Add acknowledgment request to payload
@@ -99,29 +113,34 @@ const attemptTaskDelivery = async (taskId, helperId, taskData, attemptNumber = 0
       deliveryResults.socket = false;
     }
 
-    // Always send push notification as backup/alert - important for user awareness
-    // Even if socket succeeds, push ensures notification appears if app is backgrounded
-    try {
-      console.log(`📲 [DELIVERY] Sending push notification to helper ${helperId}...`);
-      await sendToUser(
-        helperId,
-        "helper",
-        {
-          title: "New Task Available Near You!",
-          body: `${taskData.title} - ₹${taskData.budget}`,
-        },
-        {
-          type: "task_available",
-          taskId: taskId.toString(),
-          requiresAcknowledgment: "true",
-          deliveryAttempt: deliveryRecord.attemptCount.toString(),
-          deliveryRecordId: deliveryRecord.id.toString(),
-        }
-      );
-      deliveryResults.push = true;
-      console.log(`✅ [DELIVERY] Push notification sent to helper ${helperId}`);
-    } catch (pushError) {
-      console.error(`❌ [DELIVERY] Push notification failed:`, pushError.message);
+    // Only send push notification if helper is NOT actively in job search mode
+    // If they're on SearchJobScreen (helperInJobSearch=true), socket is enough
+    if (!helperInJobSearch) {
+      try {
+        console.log(`📲 [DELIVERY] Sending push notification to helper ${helperId} (not in job search mode)...`);
+        await sendToUser(
+          helperId,
+          "helper",
+          {
+            title: "New Task Available Near You!",
+            body: `${taskData.title} - ₹${taskData.budget}`,
+          },
+          {
+            type: "task_available",
+            taskId: taskId.toString(),
+            requiresAcknowledgment: "true",
+            deliveryAttempt: deliveryRecord.attemptCount.toString(),
+            deliveryRecordId: deliveryRecord.id.toString(),
+          }
+        );
+        deliveryResults.push = true;
+        console.log(`✅ [DELIVERY] Push notification sent to helper ${helperId}`);
+      } catch (pushError) {
+        console.error(`❌ [DELIVERY] Push notification failed:`, pushError.message);
+        deliveryResults.push = false;
+      }
+    } else {
+      console.log(`⏭️ [DELIVERY] Skipping push notification (helper actively in job search mode)`);
       deliveryResults.push = false;
     }
 
