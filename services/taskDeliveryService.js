@@ -45,6 +45,9 @@ const attemptTaskDelivery = async (taskId, helperId, taskData, attemptNumber = 0
       deliveryRecord = await createDeliveryRecord(taskId, helperId);
     }
 
+    // Refresh from database to get latest status (in case of concurrent updates)
+    await deliveryRecord.reload();
+
     // Check if already acknowledged
     if (deliveryRecord.deliveryStatus === "acknowledged") {
       console.log(`✅ [DELIVERY] Task ${taskId} already acknowledged by helper ${helperId}`);
