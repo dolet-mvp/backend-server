@@ -480,9 +480,12 @@ const   publishTask = async (req, res) => {
                   console.log(`✅ [PUBLISH] Task ${task.id} associated with helper ${closestHelper.helperId} (${closestHelper.distance.toFixed(2)}km)`);
                   console.log(`⏱️ [PUBLISH] Total time: ${Date.now() - startTime}ms`);
                   
-                  // NOW broadcast to helpers via socket AFTER association is complete
-                  console.log(`📡 [PUBLISH] Broadcasting to helpers now that association is complete...`);
-                  console.log(`📡 [PUBLISH] Task data being broadcast:`, {
+                  // Import delivery service at the top if not already
+                  const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
+                  
+                  // Use delivery service for reliable task delivery to associated helper
+                  console.log(`📡 [PUBLISH] Delivering task to associated helper ${closestHelper.helperId}...`);
+                  console.log(`📡 [PUBLISH] Task data being delivered:`, {
                     taskId: jobData.taskId,
                     title: jobData.title,
                     associatedHelper: closestHelper.helperId,
@@ -490,32 +493,33 @@ const   publishTask = async (req, res) => {
                   });
                   
                   try {
-                    await socketService.broadcastNewJobToSearchingHelpers(jobData);
-                    console.log(`✅ [PUBLISH] Socket broadcast completed successfully`);
-                  } catch (socketError) {
-                    console.error(`❌ [PUBLISH] Failed to broadcast job via socket:`, socketError.message);
-                    console.error(`❌ [PUBLISH] Socket error stack:`, socketError.stack);
+                    const deliveryResult = await attemptTaskDelivery(
+                      task.id, 
+                      closestHelper.helperId, 
+                      jobData, 
+                      1
+                    );
+                    
+                    if (deliveryResult.success) {
+                      console.log(`✅ [PUBLISH] Task delivery initiated successfully to helper ${closestHelper.helperId}`);
+                      if (deliveryResult.deliveryResults.socket) {
+                        console.log(`✅ [PUBLISH] Task delivered via socket immediately`);
+                      }
+                      if (deliveryResult.deliveryResults.push) {
+                        console.log(`✅ [PUBLISH] Push notification sent successfully`);
+                      }
+                      if (deliveryResult.nextRetryAt) {
+                        console.log(`⏰ [PUBLISH] Next retry scheduled at: ${deliveryResult.nextRetryAt.toISOString()}`);
+                      }
+                    } else {
+                      console.warn(`⚠️ [PUBLISH] Task delivery failed, will retry automatically`);
+                    }
+                  } catch (deliveryError) {
+                    console.error(`❌ [PUBLISH] Failed to deliver task via delivery service:`, deliveryError.message);
+                    console.error(`❌ [PUBLISH] Delivery error stack:`, deliveryError.stack);
                   }
                   
-                  // Send push notification to the associated helper
-                  try {
-                    await sendToUser(
-                      closestHelper.helperId,
-                      'helper',
-                      {
-                        title: "New Task Available Near You!",
-                        body: `${task.title} - ₹${task.budget} (${closestHelper.distance.toFixed(2)}km away)`,
-                      },
-                      {
-                        type: "task_available",
-                        taskId: task.id.toString(),
-                        distance: closestHelper.distance.toString(),
-                      }
-                    );
-                    console.log(`📲 [PUBLISH] Push notification sent to helper ${closestHelper.helperId}`);
-                  } catch (pushError) {
-                    console.error(`⚠️ [PUBLISH] Failed to send push notification:`, pushError.message);
-                  }
+                  // REMOVED: Old push notification code (now handled by delivery service)
                 }
               }
             }
