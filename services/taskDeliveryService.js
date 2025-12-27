@@ -123,34 +123,29 @@ const attemptTaskDelivery = async (taskId, helperId, taskData, attemptNumber = 0
       deliveryResults.socket = false;
     }
 
-    // Only send push notification if socket delivery failed OR helper not connected
-    // Socket delivery is primary; push is backup for offline/background scenarios
-    if (!deliveryResults.socket) {
-      try {
-        console.log(`📲 [DELIVERY] Sending push notification to helper ${helperId} (socket unavailable)...`);
-        await sendToUser(
-          helperId,
-          "helper",
-          {
-            title: "New Task Available Near You!",
-            body: `${taskData.title} - ₹${taskData.budget}`,
-          },
-          {
-            type: "task_available",
-            taskId: taskId.toString(),
-            requiresAcknowledgment: "true",
-            deliveryAttempt: deliveryRecord.attemptCount.toString(),
-            deliveryRecordId: deliveryRecord.id.toString(),
-          }
-        );
-        deliveryResults.push = true;
-        console.log(`✅ [DELIVERY] Push notification sent to helper ${helperId}`);
-      } catch (pushError) {
-        console.error(`❌ [DELIVERY] Push notification failed:`, pushError.message);
-        deliveryResults.push = false;
-      }
-    } else {
-      console.log(`⏭️ [DELIVERY] Skipping push notification (socket delivery succeeded)`);
+    // Always send push notification for OS-level alert (sound, banner, badge)
+    // Socket handles data delivery, push handles user notification
+    try {
+      console.log(`📲 [DELIVERY] Sending push notification to helper ${helperId}...`);
+      await sendToUser(
+        helperId,
+        "helper",
+        {
+          title: "New Task Available Near You!",
+          body: `${taskData.title} - ₹${taskData.budget}`,
+        },
+        {
+          type: "task_available",
+          taskId: taskId.toString(),
+          requiresAcknowledgment: "true",
+          deliveryAttempt: deliveryRecord.attemptCount.toString(),
+          deliveryRecordId: deliveryRecord.id.toString(),
+        }
+      );
+      deliveryResults.push = true;
+      console.log(`✅ [DELIVERY] Push notification sent to helper ${helperId}`);
+    } catch (pushError) {
+      console.error(`❌ [DELIVERY] Push notification failed:`, pushError.message);
       deliveryResults.push = false;
     }
 
