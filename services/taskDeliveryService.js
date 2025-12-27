@@ -224,20 +224,30 @@ const acknowledgeTaskDelivery = async (taskId, helperId, metadata = {}) => {
       },
     });
 
-    // Remove from retry queue
+    // Remove from retry queue more aggressively
     try {
+      // Try multiple approaches to ensure removal
       const retryQueueMembers = await redis.zrange("task:delivery:retry_queue", 0, -1);
+      let removedCount = 0;
+      
       for (const member of retryQueueMembers) {
         try {
           const data = typeof member === 'string' ? JSON.parse(member) : member;
           if (data.taskId === taskId && data.helperId === helperId) {
-            await redis.zrem("task:delivery:retry_queue", typeof member === 'string' ? member : JSON.stringify(member));
+            const memberStr = typeof member === 'string' ? member : JSON.stringify(member);
+            await redis.zrem("task:delivery:retry_queue", memberStr);
+            removedCount++;
             console.log(`🗑️ [DELIVERY] Removed from retry queue: task ${taskId} -> helper ${helperId}`);
-            break;
           }
         } catch (parseError) {
           console.warn(`⚠️ [DELIVERY] Failed to parse retry queue member:`, parseError.message);
         }
+      }
+      
+      if (removedCount === 0) {
+        console.log(`ℹ️ [DELIVERY] No retry queue entries found for task ${taskId} -> helper ${helperId}`);
+      } else if (removedCount > 1) {
+        console.warn(`⚠️ [DELIVERY] Removed ${removedCount} duplicate retry entries`);
       }
     } catch (redisError) {
       console.error(`⚠️ [DELIVERY] Failed to remove from retry queue:`, redisError.message);
