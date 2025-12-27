@@ -151,6 +151,13 @@ const attemptTaskDelivery = async (taskId, helperId, taskData, attemptNumber = 0
 
     // Update delivery status
     if (deliveryResults.socket || deliveryResults.push) {
+      // Check if already acknowledged before scheduling retry
+      await deliveryRecord.reload();
+      if (deliveryRecord.deliveryStatus === "acknowledged") {
+        console.log(`✅ [DELIVERY] Task ${taskId} acknowledged before retry scheduling - skipping retry`);
+        return { success: true, acknowledged: true, deliveryResults };
+      }
+      
       await deliveryRecord.update({
         deliveryStatus: "delivered",
         metadata: {
