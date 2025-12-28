@@ -335,12 +335,14 @@ title, description, category, budget, estimatedDuration, dueDate, priority, loca
   - "description" (string): Clear description of the step
   - "location" (string or null): Include specific location ONLY if that step requires a specific place/address. If the step doesn't need a specific location, set to null.
   
-  IMPORTANT: If the task description mentions specific locations for certain steps (for example, “go to SBI Bank” or “visit the shop”), include that location information in the relevant step’s location field.If the task is related to home activities, provide location details only for the first step; there is no need to fill in locations for all subsequent steps, as those steps take place at the user’s home.If location information is not mentioned or not applicable, set the location field to null.Dont put irrelevant location.
+  IMPORTANT: If the task description mentions specific locations for certain steps (for example, “go to SBI Bank ,Shibpur branch ” or “visit the Aparna Neo Mall”), include that location information in the relevant step’s location field.If the location is not particulary specified then set the location field to null.If location information is not mentioned then set the location field to null. Dont put irrelevant location in any steps.
   
   Minimum 1 step is required.
 - Respond ONLY with the JSON object (do not add explanatory text).
 `;
    
+
+//If the task is related to home activities, provide location details only for the first step; there is no need to fill in locations for all subsequent steps, as those steps take place at the user’s home
 
     
     console.log('✅ Prompt built successfully');
