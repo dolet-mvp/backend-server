@@ -1554,6 +1554,16 @@ const increaseReward = async (req, res) => {
       
       setImmediate(async () => {
         try {
+          // Clear the existing delivery acknowledgment so the task can be re-delivered with new price
+          const TaskDeliveryAcknowledgment = require('../../models/taskModel/taskDeliveryAcknowledgmentModel');
+          await TaskDeliveryAcknowledgment.destroy({
+            where: { 
+              task_id: taskId,
+              helper_id: currentHelperId
+            }
+          });
+          console.log(`🧹 [REWARD INCREASE] Cleared delivery acknowledgment for helper ${currentHelperId}`);
+          
           const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
           
           // Deliver the updated task with new price to the current helper
