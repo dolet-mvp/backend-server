@@ -1508,6 +1508,13 @@ const increaseReward = async (req, res) => {
     console.log(`🧹 [REWARD INCREASE] Clearing all helper actions for task ${taskId}`);
     await redis.del(`task:${taskId}:actions`);
     
+    // Clear ALL delivery acknowledgments so helpers can receive the task again after rotation
+    console.log(`🧹 [REWARD INCREASE] Clearing all delivery acknowledgments for task ${taskId}`);
+    const TaskDeliveryAcknowledgment = require('../../models/taskModel/taskDeliveryAcknowledgmentModel');
+    await TaskDeliveryAcknowledgment.destroy({
+      where: { task_id: taskId }
+    });
+    
     // Get the currently assigned helper (if any) - we'll keep their assignment
     const existingAssociatedHelpers = await redis.get(`task:${taskId}:associated_helpers`);
     let currentHelperId = null;
@@ -1562,7 +1569,7 @@ const increaseReward = async (req, res) => {
               helper_id: currentHelperId
             }
           });
-          console.log(`🧹 [REWARD INCREASE] Cleared delivery acknowledgment for helper ${currentHelperId}`);
+          console.log(`🧹 [REWARD INCREASE] Cleared delivery acknowledgment for current helper ${currentHelperId}`);
           
           const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
           
