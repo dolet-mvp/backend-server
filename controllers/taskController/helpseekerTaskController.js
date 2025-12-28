@@ -1548,12 +1548,24 @@ const increaseReward = async (req, res) => {
     await redis.setex(`job:${task.id}`, 2592000, JSON.stringify(jobData));
     console.log(`✅ [REWARD INCREASE] Updated Redis job data with new budget`);
 
-    // If there's a currently assigned helper, notify only them
+    // If there's a currently assigned helper, deliver updated task to them
     if (currentHelperId) {
-      console.log(`📲 [REWARD INCREASE] Notifying currently assigned helper ${currentHelperId}`);
+      console.log(`📲 [REWARD INCREASE] Delivering updated task to currently assigned helper ${currentHelperId}`);
       
       setImmediate(async () => {
         try {
+          const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
+          
+          // Deliver the updated task with new price to the current helper
+          const deliveryResult = await attemptTaskDelivery(task.id, currentHelperId, jobData, 1);
+          
+          if (deliveryResult.success) {
+            console.log(`✅ [REWARD INCREASE] Task with new price delivered to helper ${currentHelperId}`);
+          } else {
+            console.log(`⚠️ [REWARD INCREASE] Failed to deliver task to helper ${currentHelperId}`);
+          }
+          
+          // Also send specific reward increase notification via socket
           const socketService = require('../../services/socketService');
           const io = socketService.getIO();
           const helperSocketEntry = Array.from(socketService.connectedUsers.entries()).find(
@@ -1564,7 +1576,6 @@ const increaseReward = async (req, res) => {
             const socketId = helperSocketEntry[0];
             const socket = io.sockets.sockets.get(socketId);
             if (socket) {
-              // Send reward increased notification
               socket.emit('taskRewardIncreased', {
                 taskId: task.id,
                 oldBudget: parseFloat(oldBudget),
@@ -1572,11 +1583,7 @@ const increaseReward = async (req, res) => {
                 increase: parseFloat(task.budget) - parseFloat(oldBudget),
                 title: task.title,
               });
-              
-              // Also send updated job data
-              socket.emit('jobUpdate', jobData);
-              
-              console.log(`✅ [REWARD INCREASE] Notified helper ${currentHelperId} about reward increase`);
+              console.log(`✅ [REWARD INCREASE] Sent reward increase notification to helper ${currentHelperId}`);
             }
           }
           
@@ -1588,7 +1595,7 @@ const increaseReward = async (req, res) => {
             taskId: task.id,
             title: "Task Reward Increased!",
             message: `The reward for "${task.title}" has been increased from $${oldBudget} to $${task.budget}!`,
-            type: "reward_increase",
+            type: "general",
             priority: "high",
           });
           
