@@ -194,21 +194,15 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-//testing
 initDB(() => {
-  // Initialize Socket.IO server
   initSocketServer(server);
-  
-  // Initialize Firebase for push notifications
   initializeFirebase();
   
   server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
     initTaskScheduler();
     console.log(' Task scheduler initialized');
-    
-    // Initialize task delivery retry processor
-    const RETRY_INTERVAL = 2000; // Process every 2 seconds
+    const RETRY_INTERVAL = 2000; 
     setInterval(async () => {
       try {
         await processRetryQueue();
@@ -219,5 +213,3 @@ initDB(() => {
     console.log(`✅ Task delivery retry processor initialized (interval: ${RETRY_INTERVAL}ms)`);
   });
 });
-
-//testing
