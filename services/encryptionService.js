@@ -41,6 +41,13 @@ const decrypt = (encryptedText) => {
     }
     
     const iv = Buffer.from(parts[0], 'hex');
+    
+    // Validate IV length
+    if (iv.length !== IV_LENGTH) {
+      console.warn('⚠️ Invalid IV length, returning null');
+      return null;
+    }
+    
     const encrypted = parts[1];
     const decipher = crypto.createDecipheriv(ALGORITHM, getKey(), iv);
     
@@ -49,8 +56,8 @@ const decrypt = (encryptedText) => {
     
     return decrypted;
   } catch (error) {
-    console.error('Decryption error:', error);
-    return encryptedText; 
+    // Silently return null for invalid encrypted data
+    return null; 
   }
 };
 
@@ -82,10 +89,21 @@ const decryptHelperData = (helper) => {
   
   const helperData = helper.toJSON ? helper.toJSON() : helper;
   
-  // Decrypt document fields
-  if (helperData.aadharCardDocument) helperData.aadharCardDocument = decrypt(helperData.aadharCardDocument);
-  if (helperData.addressProofDocument) helperData.addressProofDocument = decrypt(helperData.addressProofDocument);
-  if (helperData.drivingLicenseDocument) helperData.drivingLicenseDocument = decrypt(helperData.drivingLicenseDocument);
+  // Decrypt document fields - return null if decryption fails
+  try {
+    if (helperData.aadharCardDocument) {
+      helperData.aadharCardDocument = decrypt(helperData.aadharCardDocument);
+    }
+    if (helperData.addressProofDocument) {
+      helperData.addressProofDocument = decrypt(helperData.addressProofDocument);
+    }
+    if (helperData.drivingLicenseDocument) {
+      helperData.drivingLicenseDocument = decrypt(helperData.drivingLicenseDocument);
+    }
+  } catch (error) {
+    // Silently handle decryption errors for individual fields
+    console.warn('⚠️ Failed to decrypt some helper documents');
+  }
   
   return helperData;
 };
