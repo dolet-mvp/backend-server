@@ -1504,42 +1504,24 @@ const increaseReward = async (req, res) => {
 
     console.log(`💰 [REWARD INCREASE] Task ${taskId} reward increased from ${oldBudget} to ${task.budget}`);
 
-    // Clear all helper actions for this task (rejected/passed) to give everyone a fresh chance
+    // Clear all helper actions for this task to give everyone a fresh chance with the new price
     console.log(`🧹 [REWARD INCREASE] Clearing all helper actions for task ${taskId}`);
     await redis.del(`task:${taskId}:actions`);
-
-    // Clear task delivery acknowledgments so helpers can receive the updated task
-    console.log(`🧹 [REWARD INCREASE] Clearing delivery acknowledgments for task ${taskId}`);
-    const TaskDeliveryAcknowledgment = require('../../models/taskModel/taskDeliveryAcknowledgmentModel');
-    await TaskDeliveryAcknowledgment.destroy({
-      where: { task_id: taskId }
-    });
-
-    // Clear existing helper associations for this task
-    console.log(`🧹 [REWARD INCREASE] Clearing existing helper associations for task ${taskId}`);
+    
+    // Get the currently assigned helper (if any) - we'll keep their assignment
     const existingAssociatedHelpers = await redis.get(`task:${taskId}:associated_helpers`);
+    let currentHelperId = null;
+    
     if (existingAssociatedHelpers) {
       const helperIds = typeof existingAssociatedHelpers === 'string' 
         ? JSON.parse(existingAssociatedHelpers) 
         : existingAssociatedHelpers;
       
-      // Remove task from each helper's associated tasks
-      const cleanupPromises = helperIds.map(async (helperId) => {
-        const helperTasksKey = `helper:${helperId}:associated_tasks`;
-        const tasksData = await redis.get(helperTasksKey);
-        if (tasksData) {
-          const tasks = typeof tasksData === 'string' ? JSON.parse(tasksData) : tasksData;
-          const updatedTasks = tasks.filter(id => id !== taskId);
-          if (updatedTasks.length > 0) {
-            await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedTasks));
-          } else {
-            await redis.del(helperTasksKey);
-          }
-        }
-      });
-      await Promise.all(cleanupPromises);
+      if (Array.isArray(helperIds) && helperIds.length > 0) {
+        currentHelperId = helperIds[0];
+        console.log(`📌 [REWARD INCREASE] Task ${taskId} currently assigned to helper ${currentHelperId}`);
+      }
     }
-    await redis.del(`task:${taskId}:associated_helpers`);
 
     // Fetch helpseeker data for Redis
     const helpseeker = await Helpseeker.findByPk(helpseekerId);
@@ -1566,260 +1548,71 @@ const increaseReward = async (req, res) => {
     await redis.setex(`job:${task.id}`, 2592000, JSON.stringify(jobData));
     console.log(`✅ [REWARD INCREASE] Updated Redis job data with new budget`);
 
-    // Re-run helper association logic (same as publish) in background
-    const taskLocationForReward = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
-    const hasValidLocation = taskLocationForReward && taskLocationForReward.lat && taskLocationForReward.lng;
-    
-    if (hasValidLocation) {
-      console.log(`🔄 [REWARD INCREASE] Starting fresh helper association for task ${taskId}`);
-      
-      // Capture location in closure
-      const taskLat = taskLocationForReward.lat;
-      const taskLng = taskLocationForReward.lng;
+    // If there's a currently assigned helper, notify only them
+    if (currentHelperId) {
+      console.log(`📲 [REWARD INCREASE] Notifying currently assigned helper ${currentHelperId}`);
       
       setImmediate(async () => {
         try {
-          const startTime = Date.now();
+          const socketService = require('../../services/socketService');
+          const io = socketService.getIO();
+          const helperSocketEntry = Array.from(socketService.connectedUsers.entries()).find(
+            ([socketId, user]) => user.userId === currentHelperId && user.userType === 'helper'
+          );
           
-          // Get online helpers
-          const onlineHelperIds = await redis.zrange('helpers:available', 0, -1);
-          console.log(`🔗 [REWARD INCREASE] Found ${onlineHelperIds.length} online helpers`);
-          
-          if (onlineHelperIds.length > 0) {
-            const helpersData = await Promise.all(
-              onlineHelperIds.map(id => redis.get(`helper:online:${id}`))
-            );
-            
-            const eligibleHelpers = [];
-            
-            // Get all helpers with addresses (no action filtering since we just cleared actions)
-            for (const helperData of helpersData) {
-              if (!helperData) continue;
+          if (helperSocketEntry) {
+            const socketId = helperSocketEntry[0];
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) {
+              // Send reward increased notification
+              socket.emit('taskRewardIncreased', {
+                taskId: task.id,
+                oldBudget: parseFloat(oldBudget),
+                newBudget: parseFloat(task.budget),
+                increase: parseFloat(task.budget) - parseFloat(oldBudget),
+                title: task.title,
+              });
               
-              const helper = typeof helperData === 'string' ? JSON.parse(helperData) : helperData;
-              const helperId = helper.id;
+              // Also send updated job data
+              socket.emit('jobUpdate', jobData);
               
-              const helperAddress = helper.addresses?.find(addr => addr.isDefault) || helper.addresses?.[0];
-              if (helperAddress && helperAddress.latitude && helperAddress.longitude) {
-                eligibleHelpers.push({
-                  helperId: helperId,
-                  latitude: helperAddress.latitude,
-                  longitude: helperAddress.longitude
-                });
-              }
-            }
-            
-            console.log(`🔗 [REWARD INCREASE] ${eligibleHelpers.length} eligible helpers for association`);
-            
-            if (eligibleHelpers.length > 0) {
-              const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-              const axios = require('axios');
-              const helpersWithDistance = [];
-              
-              if (apiKey) {
-                // Check cache for distances
-                const cacheCheckPromises = eligibleHelpers.map(async (helper) => {
-                  const cached = await getCachedDistance(
-                    helper.latitude,
-                    helper.longitude,
-                    taskLat,
-                    taskLng
-                  );
-                  
-                  if (cached && cached.distanceInMeters) {
-                    const distanceInKm = cached.distanceInMeters / 1000;
-                    if (distanceInKm <= 50) {
-                      return {
-                        helperId: helper.helperId,
-                        distance: distanceInKm,
-                        cached: true
-                      };
-                    }
-                  }
-                  
-                  return {
-                    helperId: helper.helperId,
-                    helper: helper,
-                    cached: false
-                  };
-                });
-                
-                const cacheResults = await Promise.all(cacheCheckPromises);
-                const cachedHelpers = cacheResults.filter(r => r.cached);
-                const uncachedHelpers = cacheResults
-                  .filter(r => !r.cached)
-                  .map(r => r.helper);
-                
-                helpersWithDistance.push(...cachedHelpers);
-                console.log(`📊 [REWARD INCREASE] Cache hits: ${cachedHelpers.length}/${eligibleHelpers.length}`);
-                
-                // Call API for uncached helpers
-                if (uncachedHelpers.length > 0) {
-                  const batchSize = 25;
-                  for (let i = 0; i < uncachedHelpers.length; i += batchSize) {
-                    const batch = uncachedHelpers.slice(i, i + batchSize);
-                    const originsStr = batch.map(h => `${h.latitude},${h.longitude}`).join('|');
-                    
-                    try {
-                      const response = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
-                        params: {
-                          origins: originsStr,
-                          destinations: `${taskLat},${taskLng}`,
-                          key: apiKey,
-                          units: 'metric',
-                        },
-                        timeout: 5000,
-                      });
-                      
-                      if (response.data.status === 'OK') {
-                        const distancesToCache = [];
-                        
-                        response.data.rows.forEach((row, index) => {
-                          if (row.elements[0] && row.elements[0].status === 'OK') {
-                            const distanceInKm = row.elements[0].distance.value / 1000;
-                            
-                            distancesToCache.push({
-                              originLat: batch[index].latitude,
-                              originLng: batch[index].longitude,
-                              destLat: taskLat,
-                              destLng: taskLng,
-                              distanceData: {
-                                distanceInMeters: row.elements[0].distance.value,
-                                durationInSeconds: row.elements[0].duration.value,
-                                distanceText: row.elements[0].distance.text,
-                                durationText: row.elements[0].duration.text
-                              }
-                            });
-                            
-                            if (distanceInKm <= 50) {
-                              helpersWithDistance.push({
-                                helperId: batch[index].helperId,
-                                distance: distanceInKm
-                              });
-                            }
-                          }
-                        });
-                        
-                        if (distancesToCache.length > 0) {
-                          batchCacheDistances(distancesToCache).catch(err => 
-                            console.error('Failed to cache distances:', err)
-                          );
-                        }
-                      }
-                    } catch (error) {
-                      console.warn(`⚠️ Batch distance calculation failed:`, error.message);
-                    }
-                  }
-                }
-              }
-              
-              console.log(`🔗 [REWARD INCREASE] ${helpersWithDistance.length} helpers within 50km`);
-              
-              if (helpersWithDistance.length > 0) {
-                // Sort by distance and associate with closest helper
-                helpersWithDistance.sort((a, b) => a.distance - b.distance);
-                const closestHelper = helpersWithDistance[0];
-                
-                await redis.setex(
-                  `task:${task.id}:associated_helpers`,
-                  2592000,
-                  JSON.stringify([closestHelper.helperId])
-                );
-                
-                const helperTasksKey = `helper:${closestHelper.helperId}:associated_tasks`;
-                const existingTasks = await redis.get(helperTasksKey);
-                let taskIds = existingTasks 
-                  ? (typeof existingTasks === 'string' ? JSON.parse(existingTasks) : existingTasks)
-                  : [];
-                
-                if (!taskIds.includes(task.id)) {
-                  taskIds.push(task.id);
-                  await redis.setex(helperTasksKey, 43200, JSON.stringify(taskIds));
-                }
-                
-                console.log(`✅ [REWARD INCREASE] Task ${task.id} re-associated with helper ${closestHelper.helperId} (${closestHelper.distance.toFixed(2)}km)`);
-                console.log(`⏱️ [REWARD INCREASE] Total reassociation time: ${Date.now() - startTime}ms`);
-                
-                // Use delivery service for reliable task delivery with retry and acknowledgment
-                console.log(`📡 [REWARD INCREASE] Delivering updated task ${task.id} to helper ${closestHelper.helperId}...`);
-                const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
-                
-                try {
-                  const deliveryResult = await attemptTaskDelivery(task.id, closestHelper.helperId, jobData, 1);
-                  
-                  if (deliveryResult.success) {
-                    console.log(`✅ [REWARD INCREASE] Task delivery initiated to helper with retry mechanism`);
-                    
-                    // Also send specific reward increase notification
-                    try {
-                      const io = socketService.getIO();
-                      const helperSocketEntry = Array.from(socketService.connectedUsers.entries()).find(
-                        ([socketId, user]) => user.userId === closestHelper.helperId && user.userType === 'helper'
-                      );
-                      
-                      if (helperSocketEntry) {
-                        const socketId = helperSocketEntry[0];
-                        const socket = io.sockets.sockets.get(socketId);
-                        if (socket) {
-                          socket.emit('taskRewardIncreased', {
-                            taskId: task.id,
-                            oldBudget: parseFloat(oldBudget),
-                            newBudget: parseFloat(task.budget),
-                            increase: parseFloat(task.budget) - parseFloat(oldBudget),
-                            title: task.title,
-                          });
-                          console.log(`💰 [REWARD INCREASE] Notified helper ${closestHelper.helperId} via socket about reward increase`);
-                        }
-                      }
-                    } catch (notifyError) {
-                      console.error(`⚠️ [REWARD INCREASE] Failed to send reward notification:`, notifyError.message);
-                    }
-                  }
-                } catch (deliveryError) {
-                  console.error(`❌ [REWARD INCREASE] Delivery error:`, deliveryError.message);
-                }
-              }
+              console.log(`✅ [REWARD INCREASE] Notified helper ${currentHelperId} about reward increase`);
             }
           }
-        } catch (error) {
-          console.error(`⚠️ [REWARD INCREASE] Helper reassociation failed:`, error.message);
+          
+          // Create database notification for the current helper
+          const Notification = require("../../models/notificationModel/notificationModel");
+          await Notification.create({
+            helperId: currentHelperId,
+            userType: 'helper',
+            taskId: task.id,
+            title: "Task Reward Increased!",
+            message: `The reward for "${task.title}" has been increased from $${oldBudget} to $${task.budget}!`,
+            type: "reward_increase",
+            priority: "high",
+          });
+          
+          console.log(`✅ [REWARD INCREASE] Created database notification for helper ${currentHelperId}`);
+        } catch (notifyError) {
+          console.error(`⚠️ [REWARD INCREASE] Failed to send notifications:`, notifyError.message);
         }
       });
     } else {
-      // For non-location tasks, send notifications to all approved helpers
-      setImmediate(async () => {
-        try {
-          const helpers = await Helper.findAll({
-            where: { verificationStatus: "approved", isApproved: true },
-          });
-
-          const notifications = helpers.map((helper) => ({
-            helperId: helper.id,
-            userType: 'helper',
-            taskId: task.id,
-            title: "Task Reward Increased",
-            message: `Reward increased from $${oldBudget} to $${task.budget} for "${task.title}". Check it out again!`,
-            type: "general",
-            priority: "high",
-          }));
-
-          await Notification.bulkCreate(notifications);
-          console.log(`✅ [REWARD INCREASE] Sent notifications to ${helpers.length} helpers`);
-        } catch (notifError) {
-          console.error(`⚠️ [REWARD INCREASE] Failed to send notifications:`, notifError.message);
-        }
-      });
+      console.log(`⚠️ [REWARD INCREASE] No currently assigned helper for task ${taskId}`);
     }
 
     res.status(200).json({
       success: true,
-      message: "Task reward increased successfully. All helpers can now see this task again.",
+      message: currentHelperId 
+        ? "Task reward increased successfully. Current helper has been notified."
+        : "Task reward increased successfully. Helper actions cleared for fresh rotation.",
       data: {
         task,
         oldBudget,
         newBudget: task.budget,
         actionsCleared: true,
-        reassociationStarted: true,
+        currentHelperId: currentHelperId,
+        reassignmentOnReject: true,
       },
     });
   } catch (error) {
