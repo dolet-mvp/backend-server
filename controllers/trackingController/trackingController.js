@@ -652,6 +652,221 @@ const getHelperLocation = async (req, res) => {
   }
 };
 
+// Abort task - Common for both helper and helpseeker
+const abortTask = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userType = req.user.userType;
+    const { taskId } = req.params;
+
+    // Find the task
+    const task = await Task.findByPk(taskId);
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    // Verify user has permission to abort this task
+    if (userType === "helper" && task.assignedHelperId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not assigned to this task",
+      });
+    }
+
+    if (userType === "helpseeker" && task.helpseekerId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not the owner of this task",
+      });
+    }
+
+    // Check if task can be aborted (must be before OTP verification)
+    // Allowed statuses: assigned, on_the_way, arrived
+    // NOT allowed: in_progress (after OTP), completed, cancelled
+    if (!["assigned", "on_the_way", "arrived"].includes(task.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot abort task in ${task.status} status. Task can only be aborted before OTP verification.`,
+      });
+    }
+
+    const helperId = task.assignedHelperId;
+    const helpseekerId = task.helpseekerId;
+
+    // Update task status to cancelled
+    task.status = "cancelled";
+    await task.save();
+
+    // Set helper back to available and update Redis
+    if (helperId) {
+      try {
+        const Address = require('../../models/addressModel/addressModel');
+        const helper = await Helper.findByPk(helperId, {
+          include: [
+            {
+              model: Address,
+              as: "addresses",
+              attributes: ["id", "street", "city", "state", "latitude", "longitude", "isDefault"],
+            },
+          ],
+        });
+
+        if (helper) {
+          // Set helper as available
+          helper.isAvailable = true;
+          await helper.save();
+
+          // Store helper in Redis as available
+          const helperData = {
+            id: helper.id,
+            fullName: helper.fullName,
+            email: helper.email,
+            phone: helper.phone,
+            profilePhoto: helper.profilePhoto,
+            isAvailable: helper.isAvailable,
+            averageRating: helper.averageRating,
+            completedTasks: helper.completedTasks,
+            addresses: helper.addresses,
+            onlineAt: new Date().toISOString(),
+          };
+
+          await redis.set(`helper:online:${helper.id}`, helperData);
+          await redis.expire(`helper:online:${helper.id}`, 43200);
+          
+          await redis.zadd('helpers:available', {
+            score: Date.now(),
+            member: helper.id,
+          });
+          
+          console.log(`✅ Helper ${helper.id} set to available after task abortion`);
+        }
+      } catch (helperError) {
+        console.warn(`⚠️ Failed to update helper availability:`, helperError.message);
+        // Continue execution even if helper update fails
+      }
+    }
+
+    // Remove tracking keys from Redis
+    try {
+      const helperTrackingKey = `tracking:task:${taskId}:helper:${helperId}`;
+      const helpseekerTrackingKey = `tracking:task:${taskId}:helpseeker:${helpseekerId}`;
+      
+      await redis.del(helperTrackingKey);
+      await redis.del(helpseekerTrackingKey);
+      
+      console.log(`✅ Tracking keys removed from Redis for aborted task ${taskId}`);
+    } catch (redisError) {
+      console.warn(`⚠️ Failed to remove tracking keys from Redis:`, redisError.message);
+    }
+
+    // Clean up task associations from Redis
+    try {
+      console.log(`\n🧹 Cleaning up task associations for aborted task ${taskId}...`);
+      
+      // Remove task's associated helpers
+      const taskHelpersKey = `task:${taskId}:associated_helpers`;
+      await redis.del(taskHelpersKey);
+      
+      // Remove task from helper's associated tasks list
+      if (helperId) {
+        const helperTasksKey = `helper:${helperId}:associated_tasks`;
+        const helperTasksData = await redis.get(helperTasksKey);
+        
+        if (helperTasksData) {
+          let taskIds = [];
+          if (typeof helperTasksData === 'string') {
+            taskIds = JSON.parse(helperTasksData);
+          } else if (Array.isArray(helperTasksData)) {
+            taskIds = helperTasksData;
+          }
+          
+          // Remove this task from helper's list
+          const updatedTaskIds = taskIds.filter(id => id !== taskId);
+          
+          if (updatedTaskIds.length > 0) {
+            await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedTaskIds));
+          } else {
+            await redis.del(helperTasksKey);
+          }
+        }
+      }
+      
+      // Remove task from published jobs
+      await redis.del(`job:${taskId}`);
+      await redis.zrem('jobs:published', taskId);
+      await redis.del(`task:${taskId}:actions`);
+      
+      console.log(`✅ Task ${taskId} associations cleaned up from Redis`);
+    } catch (cleanupError) {
+      console.warn(`⚠️ Failed to clean up task associations:`, cleanupError.message);
+    }
+
+    // Notify the other party
+    const abortedBy = userType === "helper" ? "helper" : "helpseeker";
+    
+    if (userType === "helper" && helpseekerId) {
+      // Helper aborted - notify helpseeker
+      await createNotification({
+        userId: helpseekerId,
+        userType: 'helpseeker',
+        taskId: task.id,
+        title: "Task Aborted",
+        message: `Your helper has cancelled the task "${task.title}"`,
+        type: "task_cancelled",
+        priority: "high",
+      });
+
+      // Emit socket event to helpseeker
+      socketService.emitToUser(helpseekerId, 'helpseeker', 'taskAborted', {
+        taskId: task.id,
+        title: task.title,
+        abortedBy: 'helper',
+        message: 'Helper has cancelled the task',
+      });
+    } else if (userType === "helpseeker" && helperId) {
+      // Helpseeker aborted - notify helper
+      await createNotification({
+        userId: helperId,
+        userType: 'helper',
+        taskId: task.id,
+        title: "Task Aborted",
+        message: `The helpseeker has cancelled the task "${task.title}"`,
+        type: "task_cancelled",
+        priority: "high",
+      });
+
+      // Emit socket event to helper
+      socketService.emitToUser(helperId, 'helper', 'taskAborted', {
+        taskId: task.id,
+        title: task.title,
+        abortedBy: 'helpseeker',
+        message: 'Helpseeker has cancelled the task',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Task aborted successfully",
+      data: {
+        taskId: task.id,
+        status: task.status,
+        abortedBy: abortedBy,
+      },
+    });
+  } catch (error) {
+    console.error("Abort task error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to abort task",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   updateOnTheWay,
   markArrived,
@@ -659,4 +874,5 @@ module.exports = {
   getTaskTracking,
   updateLocation,
   getHelperLocation,
+  abortTask,
 };

@@ -8,6 +8,7 @@ const {
   getTaskTracking,
   updateLocation,
   getHelperLocation,
+  abortTask,
 } = require("../../controllers/trackingController/trackingController");
 const { checkUserType,checkForAuthenticationCookie } = require("../../middleware/authMiddleware");
 
@@ -32,6 +33,14 @@ router.post(
   checkUserType(["helper"]),
   supabaseUpload.array("photos", 10),
   completeWork
+);
+
+// Common route for aborting/cancelling task (both helper and helpseeker)
+router.post(
+  "/task/:taskId/abort",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  abortTask
 );
 
 router.patch(
