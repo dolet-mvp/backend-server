@@ -328,10 +328,22 @@ const checkUnacceptedTasks = async () => {
           console.log(`      🗑️ Stale: TaskQueue entry for task ${entry.taskId} with status "${task.status}"`);
           await TaskQueue.destroy({ where: { id: entry.id } });
           queueOrphanedCount++;
-        } else if (task.publishedAt && !task.assignedHelperId) {
-          // Task is in queue but check if it's too old (older than 13 minutes)
-          const taskAge = Math.floor((now - new Date(task.publishedAt)) / 60000);
-          if (taskAge > 13) {
+        } else {
+          // Task is in queue - check age based on publishedAt or queue addedAt
+          const taskDate = task.publishedAt ? new Date(task.publishedAt) : (entry.addedAt ? new Date(entry.addedAt) : null);
+          
+          if (!taskDate) {
+            console.log(`      ⚠️ Warning: Task ${entry.taskId} has no publishedAt or addedAt date`);
+            queueValidCount++;
+            continue;
+          }
+          
+          const taskAge = Math.floor((now - taskDate) / 60000);
+          const isAssigned = task.assignedHelperId !== null;
+          
+          console.log(`      📝 Task ${entry.taskId.substring(0, 8)}... - Age: ${taskAge}min, Status: ${task.status}, Assigned: ${isAssigned}`);
+          
+          if (taskAge > 13 && !isAssigned) {
             console.log(`      🗑️ Expired: Task ${entry.taskId} is ${taskAge} minutes old and unassigned - cancelling`);
             // Cancel the old task
             task.status = 'cancelled';
@@ -363,8 +375,6 @@ const checkUnacceptedTasks = async () => {
           } else {
             queueValidCount++;
           }
-        } else {
-          queueValidCount++;
         }
       }
 
