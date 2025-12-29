@@ -13,6 +13,7 @@ const {
   getHelpseekerAnalytics
 } = require("../../controllers/authController/adminAuthController");
 const { getAllPendingDeliveries } = require("../../controllers/taskController/taskDeliveryController");
+const { checkUnacceptedTasks } = require("../../services/taskSchedulerService");
 
 // Update admin profile
 router.put(
@@ -93,5 +94,33 @@ router.get(
   checkUserType("admin"),
   getHelpseekerTasks
 );
+
+// Manual trigger for checking unaccepted tasks
+router.post(
+  "/tasks/cleanup-unaccepted",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  async (req, res) => {
+    try {
+      console.log(`\n🔧 [MANUAL TRIGGER] Admin ${req.user.id} triggered unaccepted tasks cleanup`);
+      await checkUnacceptedTasks();
+      res.status(200).json({
+        success: true,
+        message: "Unaccepted tasks cleanup completed successfully",
+      });
+    } catch (error) {
+      console.error("Error in manual unaccepted tasks cleanup:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to cleanup unaccepted tasks",
+        error: error.message,
+      });
+    }
+  }
+);
+
+
+
+
 
 module.exports = router;

@@ -4,14 +4,7 @@ const { Op } = require("sequelize");
 const { attemptTaskDelivery } = require("./taskDeliveryService");
 const redis = require("../config/redis/redis");
 
-/**
- * Calculate distance between two coordinates using Haversine formula
- * @param {number} lat1 - Latitude of first point
- * @param {number} lon1 - Longitude of first point
- * @param {number} lat2 - Latitude of second point
- * @param {number} lon2 - Longitude of second point
- * @returns {number} Distance in kilometers
- */
+
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371; // Radius of Earth in kilometers
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -26,18 +19,7 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-/**
- * Start intelligent job matching for a task
- * @param {Object} taskData - Task information
- * @param {string} taskData.taskId - Task ID
- * @param {string} taskData.userId - Helpseeker user ID
- * @param {string} taskData.title - Task title
- * @param {string} taskData.description - Task description
- * @param {number} taskData.budget - Task budget
- * @param {string} taskData.category - Task category
- * @param {number} taskData.latitude - Task location latitude
- * @param {number} taskData.longitude - Task location longitude
- */
+
 const startJobMatching = async (taskData) => {
   try {
     const {

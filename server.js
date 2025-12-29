@@ -207,10 +207,10 @@ initDB(() => {
       try {
         await processRetryQueue();
       } catch (error) {
-        console.error('❌ [RETRY] Error processing retry queue:', error);
+        console.error(' [RETRY] Error processing retry queue:', error);
       }
     }, RETRY_INTERVAL);
-    console.log(`✅ Task delivery retry processor initialized (interval: ${RETRY_INTERVAL}ms)`);
+    console.log(` Task delivery retry processor initialized (interval: ${RETRY_INTERVAL}ms)`);
   });
 });
 

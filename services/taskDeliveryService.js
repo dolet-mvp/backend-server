@@ -6,9 +6,7 @@ const redis = require("../config/redis/redis");
 
 const RETRY_DELAYS = [2000, 3000, 5000, 10000, 15000]; // in milliseconds
 const MAX_RETRY_ATTEMPTS = RETRY_DELAYS.length;
-/**
- * Create initial delivery tracking record for a task-helper pair
- */
+
 const createDeliveryRecord = async (taskId, helperId, deliveryMethod = "both") => {
   try {
     const [record, created] = await TaskDeliveryAcknowledgment.findOrCreate({
