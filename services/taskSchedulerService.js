@@ -170,7 +170,7 @@ const checkScheduledTasks = async () => {
 const checkUnacceptedTasks = async () => {
   try {
     const now = new Date();
-    const thirteenMinutesAgo = new Date(now.getTime() - 13 * 60 * 1000);
+    const thirteenMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000);
 
     console.log(`\n🕐 [AUTO-CLEANUP] Checking for unaccepted tasks older than 13 minutes...`);
 
