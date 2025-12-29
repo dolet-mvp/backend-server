@@ -328,6 +328,41 @@ const checkUnacceptedTasks = async () => {
           console.log(`      🗑️ Stale: TaskQueue entry for task ${entry.taskId} with status "${task.status}"`);
           await TaskQueue.destroy({ where: { id: entry.id } });
           queueOrphanedCount++;
+        } else if (task.publishedAt && !task.assignedHelperId) {
+          // Task is in queue but check if it's too old (older than 13 minutes)
+          const taskAge = Math.floor((now - new Date(task.publishedAt)) / 60000);
+          if (taskAge > 13) {
+            console.log(`      🗑️ Expired: Task ${entry.taskId} is ${taskAge} minutes old and unassigned - cancelling`);
+            // Cancel the old task
+            task.status = 'cancelled';
+            await task.save();
+            // Remove from queue
+            await TaskQueue.destroy({ where: { id: entry.id } });
+            // Clean up Redis
+            await redis.del(`job:${task.id}`);
+            await redis.zrem('jobs:published', task.id);
+            await redis.del(`task:${task.id}:associated_helpers`);
+            await redis.del(`task:${task.id}:actions`);
+            
+            // Notify helpseeker
+            try {
+              await Notification.create({
+                helpseekerId: task.helpseekerId,
+                userType: "helpseeker",
+                taskId: task.id,
+                title: "Task Auto-Cancelled",
+                message: `Your task "${task.title}" was automatically cancelled as no helper accepted it within 13 minutes`,
+                type: "general",
+                priority: "medium",
+              });
+            } catch (notifyError) {
+              console.warn(`         ⚠️ Notification failed:`, notifyError.message);
+            }
+            
+            queueOrphanedCount++;
+          } else {
+            queueValidCount++;
+          }
         } else {
           queueValidCount++;
         }
