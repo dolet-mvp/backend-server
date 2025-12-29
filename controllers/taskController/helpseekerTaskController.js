@@ -260,7 +260,7 @@ const   publishTask = async (req, res) => {
       // PERFORMANCE FIX: Batch Redis writes in parallel
       const redisStart = Date.now();
       await Promise.all([
-        redis.setex(`job:${task.id}`, 2592000, JSON.stringify(jobData)),
+        redis.setex(`job:${task.id}`, 800, JSON.stringify(jobData)),
         redis.zadd('jobs:published', {
           score: Date.now(),
           member: task.id // Store task ID, not key

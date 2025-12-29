@@ -165,15 +165,118 @@ const checkScheduledTasks = async () => {
   }
 };
 
+// Check and delete unaccepted tasks after 13 minutes
+const checkUnacceptedTasks = async () => {
+  try {
+    const now = new Date();
+    const thirteenMinutesAgo = new Date(now.getTime() - 13 * 60 * 1000);
+
+    console.log(`\n🕐 [AUTO-CLEANUP] Checking for unaccepted tasks older than 13 minutes...`);
+
+    // Find tasks in queue/published status that haven't been accepted for 13+ minutes
+    const unacceptedTasks = await Task.findAll({
+      where: {
+        status: "in_queue",
+        assignedHelperId: null, // No helper assigned yet
+        publishedAt: {
+          [Op.lte]: thirteenMinutesAgo, // Published 13+ minutes ago
+        },
+      },
+    });
+
+    if (unacceptedTasks.length > 0) {
+      console.log(`   🗑️ Found ${unacceptedTasks.length} unaccepted task(s) to auto-delete:`);
+
+      for (const task of unacceptedTasks) {
+        try {
+          const taskAge = Math.floor((now - new Date(task.publishedAt)) / 60000);
+          console.log(`      - Task "${task.title}" (ID: ${task.id}, Age: ${taskAge} min)`);
+
+          // Update task status to cancelled
+          task.status = "cancelled";
+          await task.save();
+
+          // Remove from TaskQueue
+          await TaskQueue.destroy({ where: { taskId: task.id } });
+
+          // Clean up Redis
+          try {
+            // Get associated helpers before cleanup
+            const associatedHelpersData = await redis.get(`task:${task.id}:associated_helpers`);
+            let associatedHelperIds = [];
+            
+            if (associatedHelpersData) {
+              associatedHelperIds = typeof associatedHelpersData === 'string' 
+                ? JSON.parse(associatedHelpersData) 
+                : associatedHelpersData;
+            }
+
+            // Remove task from Redis
+            await Promise.all([
+              redis.del(`job:${task.id}`),
+              redis.zrem('jobs:published', task.id),
+              redis.del(`task:${task.id}:associated_helpers`),
+              redis.del(`task:${task.id}:actions`),
+            ]);
+
+            // Remove task from each helper's associated tasks
+            const cleanupPromises = associatedHelperIds.map(async (helperId) => {
+              const helperTasksKey = `helper:${helperId}:associated_tasks`;
+              const tasksData = await redis.get(helperTasksKey);
+              if (tasksData) {
+                const tasks = typeof tasksData === 'string' ? JSON.parse(tasksData) : tasksData;
+                const updatedTasks = tasks.filter(id => id !== task.id);
+                if (updatedTasks.length > 0) {
+                  await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedTasks));
+                } else {
+                  await redis.del(helperTasksKey);
+                }
+              }
+            });
+            await Promise.all(cleanupPromises);
+
+            console.log(`         ✅ Removed from Redis and TaskQueue`);
+          } catch (redisError) {
+            console.warn(`         ⚠️ Redis cleanup failed:`, redisError.message);
+          }
+
+          // Notify helpseeker
+          try {
+            await Notification.create({
+              helpseekerId: task.helpseekerId,
+              userType: "helpseeker",
+              taskId: task.id,
+              title: "Task Auto-Cancelled",
+              message: `Your task "${task.title}" was automatically cancelled as no helper accepted it within 13 minutes`,
+              type: "general",
+              priority: "medium",
+            });
+            console.log(`         ✅ Notified helpseeker`);
+          } catch (notifyError) {
+            console.warn(`         ⚠️ Notification failed:`, notifyError.message);
+          }
+        } catch (taskError) {
+          console.error(`      ❌ Failed to delete task ${task.id}:`, taskError.message);
+        }
+      }
+    } else {
+      console.log(`   ✅ No unaccepted tasks found older than 13 minutes`);
+    }
+  } catch (error) {
+    console.error("   ❌ Error checking unaccepted tasks:", error);
+  }
+};
+
 
 const initTaskScheduler = () => {
   console.log("\n⏰ [SCHEDULER] Initializing task scheduler...");
   console.log("   Schedule: Every minute (*/1 * * * *)");
-  console.log("   Purpose: Auto-publish scheduled tasks");
+  console.log("   Purpose: Auto-publish scheduled tasks & auto-cleanup unaccepted tasks");
   
   // Run every minute: '* * * * *'
   cron.schedule("* * * * *", async () => {
     await checkScheduledTasks();
+    await checkUnacceptedTasks();
   });
 
   console.log("   ✅ Task scheduler is now active and running!\n");
@@ -201,5 +304,6 @@ const getUpcomingScheduledTasksCount = async () => {
 module.exports = {
   initTaskScheduler,
   checkScheduledTasks,
+  checkUnacceptedTasks,
   getUpcomingScheduledTasksCount,
 };
