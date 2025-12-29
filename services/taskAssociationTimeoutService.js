@@ -107,7 +107,16 @@ const findNextNearestHelper = async (taskId, excludeHelperIds = []) => {
     }
 
     // Get task location
-    const taskLocation = task.location;
+    let taskLocation = task.location;
+    
+    // If no direct location, check steps
+    if (!taskLocation || !taskLocation.lat || !taskLocation.lng) {
+      if (task.steps && task.steps.length > 0 && task.steps[0].location) {
+        taskLocation = task.steps[0].location;
+      }
+    }
+    
+    // Final validation
     if (!taskLocation || !taskLocation.lat || !taskLocation.lng) {
       console.warn(`⚠️ [ASSOCIATION] Task ${taskId} has no valid location`);
       return null;
