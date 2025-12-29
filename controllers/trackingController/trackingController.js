@@ -816,7 +816,7 @@ const abortTask = async (req, res) => {
         taskId: task.id,
         title: "Task Aborted",
         message: `Your helper has cancelled the task "${task.title}"`,
-        type: "task_cancelled",
+        type: "general",
         priority: "high",
       });
 
@@ -835,7 +835,7 @@ const abortTask = async (req, res) => {
         taskId: task.id,
         title: "Task Aborted",
         message: `The helpseeker has cancelled the task "${task.title}"`,
-        type: "task_cancelled",
+        type: "general",
         priority: "high",
       });
 
