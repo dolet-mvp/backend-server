@@ -117,20 +117,20 @@ const startJobMatching = async (taskData) => {
     await Promise.all(notificationPromises);
 
     // Get task data from Redis for delivery
-    let taskData;
+    let redisTaskData;
     try {
       const taskDataStr = await redis.get(`job:${taskId}`);
-      taskData = taskDataStr ? (typeof taskDataStr === 'string' ? JSON.parse(taskDataStr) : taskDataStr) : null;
+      redisTaskData = taskDataStr ? (typeof taskDataStr === 'string' ? JSON.parse(taskDataStr) : taskDataStr) : null;
     } catch (redisErr) {
       console.error(`❌ [JOB MATCHING] Failed to get task ${taskId} from Redis:`, redisErr);
     }
 
     // Send real-time socket notifications to all matching helpers using delivery service
-    if (taskData) {
+    if (redisTaskData) {
       console.log(`📤 [JOB MATCHING] Delivering task ${taskId} to ${matchingHelpers.length} helpers...`);
       
       const deliveryPromises = matchingHelpers.map(({ helper, distance }) => {
-        return attemptTaskDelivery(taskId, helper.id, taskData, 1).catch(err => {
+        return attemptTaskDelivery(taskId, helper.id, redisTaskData, 1).catch(err => {
           console.error(`❌ [JOB MATCHING] Failed to deliver task ${taskId} to helper ${helper.id}:`, err);
         });
       });
