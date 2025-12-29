@@ -4,7 +4,7 @@ const { emitToUser, isUserConnected, getIO, connectedUsers } = require("./socket
 const redis = require("../config/redis/redis");
 
 
-const RETRY_DELAYS = [2000, 5000, 8000, 15000, 30000]; // in milliseconds
+const RETRY_DELAYS = [2000, 3000, 5000, 10000, 15000]; // in milliseconds
 const MAX_RETRY_ATTEMPTS = RETRY_DELAYS.length;
 /**
  * Create initial delivery tracking record for a task-helper pair
