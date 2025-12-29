@@ -478,6 +478,16 @@ const   publishTask = async (req, res) => {
                   }
                   
                   console.log(`✅ [PUBLISH] Task ${task.id} associated with helper ${closestHelper.helperId} (${closestHelper.distance.toFixed(2)}km)`);
+                  
+                  // Set association timeout for auto-reassignment
+                  const { setAssociationTimeout } = require('../../services/taskAssociationTimeoutService');
+                  try {
+                    await setAssociationTimeout(task.id, closestHelper.helperId, 50);
+                    console.log(`⏰ [PUBLISH] 50-second timeout set for association`);
+                  } catch (timeoutError) {
+                    console.warn(`⚠️ [PUBLISH] Failed to set association timeout:`, timeoutError.message);
+                  }
+                  
                   console.log(`⏱️ [PUBLISH] Total time: ${Date.now() - startTime}ms`);
                   
                   // Import delivery service at the top if not already

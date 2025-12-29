@@ -5,6 +5,7 @@ const TaskQueue = require("../models/queueModel/queueModel");
 const Helper = require("../models/authModel/helperModel");
 const Notification = require("../models/notificationModel/notificationModel");
 const redis = require("../config/redis/redis");
+const { processAssociationTimeouts } = require("./taskAssociationTimeoutService");
 
 const publishScheduledTask = async (task) => {
   try {
@@ -271,12 +272,13 @@ const checkUnacceptedTasks = async () => {
 const initTaskScheduler = () => {
   console.log("\n⏰ [SCHEDULER] Initializing task scheduler...");
   console.log("   Schedule: Every minute (*/1 * * * *)");
-  console.log("   Purpose: Auto-publish scheduled tasks & auto-cleanup unaccepted tasks");
+  console.log("   Purpose: Auto-publish scheduled tasks, auto-cleanup unaccepted tasks, process association timeouts");
   
   // Run every minute: '* * * * *'
   cron.schedule("* * * * *", async () => {
     await checkScheduledTasks();
     await checkUnacceptedTasks();
+    await processAssociationTimeouts();
   });
 
   console.log("   ✅ Task scheduler is now active and running!\n");

@@ -704,6 +704,15 @@ const acceptTask = async (req, res) => {
       { where: { id: helperId }, transaction }
     );
     
+    // Clear association timeout since task is accepted
+    const { clearAssociationTimeout } = require('../../services/taskAssociationTimeoutService');
+    try {
+      await clearAssociationTimeout(taskId, helperId);
+      console.log(`✅ [ACCEPT] Association timeout cleared`);
+    } catch (timeoutError) {
+      console.warn(`⚠️ [ACCEPT] Failed to clear association timeout:`, timeoutError.message);
+    }
+    
     // FIX RACE CONDITION: Update Redis BEFORE commit to ensure atomicity
     // This prevents race window where helper appears available after accepting
     const redisCleanupStart = Date.now();
@@ -945,6 +954,15 @@ const rejectTask = async (req, res) => {
 
     // Store rejection in Redis immediately (even without reason)
     const actions = await storeHelperAction(taskId, helperId, 'rejected', rejectionReason);
+    
+    // Clear association timeout since helper rejected the task
+    const { clearAssociationTimeout } = require('../../services/taskAssociationTimeoutService');
+    try {
+      await clearAssociationTimeout(taskId, helperId);
+      console.log(`✅ [REJECT] Association timeout cleared`);
+    } catch (timeoutError) {
+      console.warn(`⚠️ [REJECT] Failed to clear association timeout:`, timeoutError.message);
+    }
     
     // Store rejection in database
     const TaskRejection = require("../../models/taskRejectionModel/taskRejectionModel");
