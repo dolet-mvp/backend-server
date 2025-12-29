@@ -170,11 +170,11 @@ const checkScheduledTasks = async () => {
 const checkUnacceptedTasks = async () => {
   try {
     const now = new Date();
-    const thirteenMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000);
+    const thirteenMinutesAgo = new Date(now.getTime() - 13 * 60 * 1000);
 
     console.log(`\n🕐 [AUTO-CLEANUP] Checking for unaccepted tasks older than 13 minutes...`);
 
-    // Find tasks in queue/published status that haven't been accepted for 13+ minutes
+    // Step 1: Find and cleanup tasks from database
     const unacceptedTasks = await Task.findAll({
       where: {
         status: "in_queue",
@@ -185,84 +185,160 @@ const checkUnacceptedTasks = async () => {
       },
     });
 
-    if (unacceptedTasks.length > 0) {
-      console.log(`   🗑️ Found ${unacceptedTasks.length} unaccepted task(s) to auto-delete:`);
+    console.log(`   📋 Found ${unacceptedTasks.length} unaccepted task(s) in database`);
 
-      for (const task of unacceptedTasks) {
+    for (const task of unacceptedTasks) {
+      try {
+        const taskAge = Math.floor((now - new Date(task.publishedAt)) / 60000);
+        console.log(`      - Task "${task.title}" (ID: ${task.id}, Age: ${taskAge} min)`);
+
+        // Update task status to cancelled
+        task.status = "cancelled";
+        await task.save();
+
+        // Remove from TaskQueue
+        await TaskQueue.destroy({ where: { taskId: task.id } });
+
+        // Clean up Redis
         try {
-          const taskAge = Math.floor((now - new Date(task.publishedAt)) / 60000);
-          console.log(`      - Task "${task.title}" (ID: ${task.id}, Age: ${taskAge} min)`);
+          // Get associated helpers before cleanup
+          const associatedHelpersData = await redis.get(`task:${task.id}:associated_helpers`);
+          let associatedHelperIds = [];
+          
+          if (associatedHelpersData) {
+            associatedHelperIds = typeof associatedHelpersData === 'string' 
+              ? JSON.parse(associatedHelpersData) 
+              : associatedHelpersData;
+          }
 
-          // Update task status to cancelled
-          task.status = "cancelled";
-          await task.save();
+          // Remove task from Redis
+          await Promise.all([
+            redis.del(`job:${task.id}`),
+            redis.zrem('jobs:published', task.id),
+            redis.del(`task:${task.id}:associated_helpers`),
+            redis.del(`task:${task.id}:actions`),
+          ]);
 
-          // Remove from TaskQueue
-          await TaskQueue.destroy({ where: { taskId: task.id } });
-
-          // Clean up Redis
-          try {
-            // Get associated helpers before cleanup
-            const associatedHelpersData = await redis.get(`task:${task.id}:associated_helpers`);
-            let associatedHelperIds = [];
-            
-            if (associatedHelpersData) {
-              associatedHelperIds = typeof associatedHelpersData === 'string' 
-                ? JSON.parse(associatedHelpersData) 
-                : associatedHelpersData;
-            }
-
-            // Remove task from Redis
-            await Promise.all([
-              redis.del(`job:${task.id}`),
-              redis.zrem('jobs:published', task.id),
-              redis.del(`task:${task.id}:associated_helpers`),
-              redis.del(`task:${task.id}:actions`),
-            ]);
-
-            // Remove task from each helper's associated tasks
-            const cleanupPromises = associatedHelperIds.map(async (helperId) => {
-              const helperTasksKey = `helper:${helperId}:associated_tasks`;
-              const tasksData = await redis.get(helperTasksKey);
-              if (tasksData) {
-                const tasks = typeof tasksData === 'string' ? JSON.parse(tasksData) : tasksData;
-                const updatedTasks = tasks.filter(id => id !== task.id);
-                if (updatedTasks.length > 0) {
-                  await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedTasks));
-                } else {
-                  await redis.del(helperTasksKey);
-                }
+          // Remove task from each helper's associated tasks
+          const cleanupPromises = associatedHelperIds.map(async (helperId) => {
+            const helperTasksKey = `helper:${helperId}:associated_tasks`;
+            const tasksData = await redis.get(helperTasksKey);
+            if (tasksData) {
+              const tasks = typeof tasksData === 'string' ? JSON.parse(tasksData) : tasksData;
+              const updatedTasks = tasks.filter(id => id !== task.id);
+              if (updatedTasks.length > 0) {
+                await redis.setex(helperTasksKey, 43200, JSON.stringify(updatedTasks));
+              } else {
+                await redis.del(helperTasksKey);
               }
-            });
-            await Promise.all(cleanupPromises);
+            }
+          });
+          await Promise.all(cleanupPromises);
 
-            console.log(`         ✅ Removed from Redis and TaskQueue`);
-          } catch (redisError) {
-            console.warn(`         ⚠️ Redis cleanup failed:`, redisError.message);
-          }
+          console.log(`         ✅ Removed from Redis and TaskQueue`);
+        } catch (redisError) {
+          console.warn(`         ⚠️ Redis cleanup failed:`, redisError.message);
+        }
 
-          // Notify helpseeker
-          try {
-            await Notification.create({
-              helpseekerId: task.helpseekerId,
-              userType: "helpseeker",
-              taskId: task.id,
-              title: "Task Auto-Cancelled",
-              message: `Your task "${task.title}" was automatically cancelled as no helper accepted it within 13 minutes`,
-              type: "general",
-              priority: "medium",
-            });
-            console.log(`         ✅ Notified helpseeker`);
-          } catch (notifyError) {
-            console.warn(`         ⚠️ Notification failed:`, notifyError.message);
+        // Notify helpseeker
+        try {
+          await Notification.create({
+            helpseekerId: task.helpseekerId,
+            userType: "helpseeker",
+            taskId: task.id,
+            title: "Task Auto-Cancelled",
+            message: `Your task "${task.title}" was automatically cancelled as no helper accepted it within 13 minutes`,
+            type: "general",
+            priority: "medium",
+          });
+          console.log(`         ✅ Notified helpseeker`);
+        } catch (notifyError) {
+          console.warn(`         ⚠️ Notification failed:`, notifyError.message);
+        }
+      } catch (taskError) {
+        console.error(`      ❌ Failed to delete task ${task.id}:`, taskError.message);
+      }
+    }
+
+    // Step 2: Cleanup orphaned Redis entries (tasks that exist in Redis but not in DB or are already completed/cancelled)
+    console.log(`\n   🧹 Checking for orphaned Redis entries...`);
+    try {
+      const publishedJobMembers = await redis.zrange('jobs:published', 0, -1);
+      console.log(`   📊 Found ${publishedJobMembers.length} entries in jobs:published`);
+      
+      let orphanedCount = 0;
+      let validCount = 0;
+
+      for (const member of publishedJobMembers) {
+        try {
+          // Extract taskId from member (format: "job:taskId" or just "taskId")
+          const taskId = member.replace('job:', '');
+          
+          // Check if task exists in database
+          const task = await Task.findByPk(taskId);
+          
+          if (!task) {
+            // Task doesn't exist in database - orphaned entry
+            console.log(`      🗑️ Orphaned: Task ${taskId} not found in database`);
+            await redis.del(`job:${taskId}`);
+            await redis.zrem('jobs:published', member);
+            await redis.del(`task:${taskId}:associated_helpers`);
+            await redis.del(`task:${taskId}:actions`);
+            orphanedCount++;
+          } else if (task.status !== 'in_queue') {
+            // Task exists but is not in queue anymore
+            console.log(`      🗑️ Stale: Task ${taskId} has status "${task.status}" (not in_queue)`);
+            await redis.del(`job:${taskId}`);
+            await redis.zrem('jobs:published', member);
+            await redis.del(`task:${taskId}:associated_helpers`);
+            await redis.del(`task:${taskId}:actions`);
+            orphanedCount++;
+          } else {
+            validCount++;
           }
-        } catch (taskError) {
-          console.error(`      ❌ Failed to delete task ${task.id}:`, taskError.message);
+        } catch (memberError) {
+          console.warn(`      ⚠️ Error processing member ${member}:`, memberError.message);
         }
       }
-    } else {
-      console.log(`   ✅ No unaccepted tasks found older than 13 minutes`);
+
+      console.log(`   ✅ Redis cleanup complete: ${orphanedCount} orphaned entries removed, ${validCount} valid entries kept`);
+    } catch (redisError) {
+      console.warn(`   ⚠️ Redis orphan cleanup failed:`, redisError.message);
     }
+
+    // Step 3: Cleanup orphaned TaskQueue entries
+    console.log(`\n   🧹 Checking for orphaned TaskQueue entries...`);
+    try {
+      const queueEntries = await TaskQueue.findAll();
+      console.log(`   📊 Found ${queueEntries.length} entries in TaskQueue`);
+      
+      let queueOrphanedCount = 0;
+      let queueValidCount = 0;
+
+      for (const entry of queueEntries) {
+        const task = await Task.findByPk(entry.taskId);
+        
+        if (!task) {
+          // Task doesn't exist in database
+          console.log(`      🗑️ Orphaned: TaskQueue entry for non-existent task ${entry.taskId}`);
+          await TaskQueue.destroy({ where: { id: entry.id } });
+          queueOrphanedCount++;
+        } else if (task.status !== 'in_queue') {
+          // Task exists but is not in queue
+          console.log(`      🗑️ Stale: TaskQueue entry for task ${entry.taskId} with status "${task.status}"`);
+          await TaskQueue.destroy({ where: { id: entry.id } });
+          queueOrphanedCount++;
+        } else {
+          queueValidCount++;
+        }
+      }
+
+      console.log(`   ✅ TaskQueue cleanup complete: ${queueOrphanedCount} orphaned entries removed, ${queueValidCount} valid entries kept`);
+    } catch (queueError) {
+      console.warn(`   ⚠️ TaskQueue orphan cleanup failed:`, queueError.message);
+    }
+
+    console.log(`\n   ✅ Auto-cleanup process completed\n`);
   } catch (error) {
     console.error("   ❌ Error checking unaccepted tasks:", error);
   }
