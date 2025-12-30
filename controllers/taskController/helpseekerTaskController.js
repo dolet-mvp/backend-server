@@ -1639,16 +1639,16 @@ const increaseReward = async (req, res) => {
             
             const deliveryResult = await attemptTaskDelivery(taskId, nearestHelperId, jobData, 1);
             
-            if (deliveryResult.success) {
+            if (deliveryResult && deliveryResult.success) {
               console.log(`✅ [REWARD INCREASE] Task with increased price delivered to helper ${nearestHelperId}`);
-              if (deliveryResult.deliveryResults.socket) {
+              if (deliveryResult.deliveryResults && deliveryResult.deliveryResults.socket) {
                 console.log(`✅ [REWARD INCREASE] Delivered via socket immediately`);
               }
-              if (deliveryResult.deliveryResults.push) {
+              if (deliveryResult.deliveryResults && deliveryResult.deliveryResults.push) {
                 console.log(`✅ [REWARD INCREASE] Push notification sent`);
               }
             } else {
-              console.log(`⚠️ [REWARD INCREASE] Failed to deliver task: ${deliveryResult.error}`);
+              console.log(`⚠️ [REWARD INCREASE] Failed to deliver task: ${deliveryResult?.error || 'Unknown error'}`);
             }
           } else {
             console.log(`⚠️ [REWARD INCREASE] No available helper found for task ${taskId}`);
