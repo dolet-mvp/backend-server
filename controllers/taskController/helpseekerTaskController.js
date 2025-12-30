@@ -1607,6 +1607,35 @@ const increaseReward = async (req, res) => {
           // This will start fresh assignment from first available helper
           await findAndAssociateNearestHelper(taskId, taskLocation);
           console.log(`✅ [REWARD INCREASE] Round-robin assignment triggered for task ${taskId}`);
+          
+          // Now deliver the task to the newly associated helper
+          const associatedHelpersData = await redis.get(`task:${taskId}:associated_helpers`);
+          if (associatedHelpersData) {
+            const helperIds = typeof associatedHelpersData === 'string' 
+              ? JSON.parse(associatedHelpersData) 
+              : associatedHelpersData;
+            
+            if (Array.isArray(helperIds) && helperIds.length > 0) {
+              const newHelperId = helperIds[0];
+              console.log(`📲 [REWARD INCREASE] Delivering updated task to newly assigned helper ${newHelperId}...`);
+              
+              // Import and use the task delivery service
+              const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
+              
+              // Deliver the task with updated price
+              const deliveryResult = await attemptTaskDelivery(taskId, newHelperId, jobData, 1);
+              
+              if (deliveryResult.success) {
+                console.log(`✅ [REWARD INCREASE] Task with increased price delivered to helper ${newHelperId}`);
+              } else {
+                console.log(`⚠️ [REWARD INCREASE] Failed to deliver task to helper ${newHelperId}: ${deliveryResult.error}`);
+              }
+            } else {
+              console.log(`⚠️ [REWARD INCREASE] No helper associated after round-robin assignment`);
+            }
+          } else {
+            console.log(`⚠️ [REWARD INCREASE] No association data found after round-robin assignment`);
+          }
         } else {
           console.log(`⚠️ [REWARD INCREASE] Task ${taskId} has no location, skipping auto-assignment`);
         }
