@@ -1540,7 +1540,7 @@ const increaseReward = async (req, res) => {
     console.log(`✅ [REWARD INCREASE] Cleared task-helper associations`);
     
     // Clear delivery acknowledgments so helpers can receive the task again
-    const TaskDeliveryAcknowledgment = require("../../models/queueModel/queueModel");
+    const TaskDeliveryAcknowledgment = require("../../models/taskModel/taskDeliveryAcknowledgmentModel");
     await TaskDeliveryAcknowledgment.destroy({
       where: { taskId: taskId }
     });
@@ -1596,8 +1596,8 @@ const increaseReward = async (req, res) => {
     // Since we cleared all actions, everyone gets a fresh chance
     console.log(`🔄 [REWARD INCREASE] Triggering round-robin assignment from the beginning...`);
     
-    setImmediate(async () => {
-      try {
+    // Run synchronously to ensure database deletions complete before delivery
+    try {
         const { findAndAssociateNearestHelper } = require('../helperController/helperController');
         
         // Get task location from main location or first step
@@ -1656,10 +1656,9 @@ const increaseReward = async (req, res) => {
         } else {
           console.log(`⚠️ [REWARD INCREASE] Task ${taskId} has no location, skipping auto-assignment`);
         }
-      } catch (error) {
-        console.error(`⚠️ [REWARD INCREASE] Failed to trigger round-robin assignment:`, error.message);
-      }
-    });
+    } catch (error) {
+      console.error(`⚠️ [REWARD INCREASE] Failed to trigger round-robin assignment:`, error.message);
+    }
 
     res.status(200).json({
       success: true,
