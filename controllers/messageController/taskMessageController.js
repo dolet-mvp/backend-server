@@ -94,22 +94,22 @@ const sendTaskMessage = async (req, res) => {
     delete messageData.senderHelper;
     delete messageData.senderHelpseeker;
 
-    // Send notification to the other user
-    const isHelpseekerSender = senderId === task.helpseekerId;
-    const receiverId = isHelpseekerSender ? task.assignedHelperId : task.helpseekerId;
-    const receiverType = isHelpseekerSender ? 'helper' : 'helpseeker';
+    // Send notification to the other user - DISABLED: No notifications for messages
+    // const isHelpseekerSender = senderId === task.helpseekerId;
+    // const receiverId = isHelpseekerSender ? task.assignedHelperId : task.helpseekerId;
+    // const receiverType = isHelpseekerSender ? 'helper' : 'helpseeker';
     
-    if (receiverId) {
-      await createNotification({
-        userId: receiverId,
-        userType: receiverType,
-        taskId: taskId,
-        title: "New Task Message",
-        message: `You have a new message for task: ${task.title}`,
-        type: "general",
-        priority: "medium",
-      });
-    }
+    // if (receiverId) {
+    //   await createNotification({
+    //     userId: receiverId,
+    //     userType: receiverType,
+    //     taskId: taskId,
+    //     title: "New Task Message",
+    //     message: `You have a new message for task: ${task.title}`,
+    //     type: "general",
+    //     priority: "medium",
+    //   });
+    // }
 
     return res.status(201).json({
       success: true,
