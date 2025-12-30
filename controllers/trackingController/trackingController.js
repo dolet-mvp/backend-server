@@ -805,48 +805,50 @@ const abortTask = async (req, res) => {
       console.warn(`⚠️ Failed to clean up task associations:`, cleanupError.message);
     }
 
-    // Notify the other party
-    const abortedBy = userType === "helper" ? "helper" : "helpseeker";
+    // Notify the other party - DISABLED
+    // const abortedBy = userType === "helper" ? "helper" : "helpseeker";
     
-    if (userType === "helper" && helpseekerId) {
-      // Helper aborted - notify helpseeker
-      await createNotification({
-        userId: helpseekerId,
-        userType: 'helpseeker',
-        taskId: task.id,
-        title: "Task Aborted",
-        message: `Your helper has cancelled the task "${task.title}"`,
-        type: "general",
-        priority: "high",
-      });
+    // if (userType === "helper" && helpseekerId) {
+    //   // Helper aborted - notify helpseeker
+    //   await createNotification({
+    //     userId: helpseekerId,
+    //     userType: 'helpseeker',
+    //     taskId: task.id,
+    //     title: "Task Aborted",
+    //     message: `Your helper has cancelled the task "${task.title}"`,
+    //     type: "general",
+    //     priority: "high",
+    //   });
 
-      // Emit socket event to helpseeker
-      socketService.emitToUser(helpseekerId, 'helpseeker', 'taskAborted', {
-        taskId: task.id,
-        title: task.title,
-        abortedBy: 'helper',
-        message: 'Helper has cancelled the task',
-      });
-    } else if (userType === "helpseeker" && helperId) {
-      // Helpseeker aborted - notify helper
-      await createNotification({
-        userId: helperId,
-        userType: 'helper',
-        taskId: task.id,
-        title: "Task Aborted",
-        message: `The helpseeker has cancelled the task "${task.title}"`,
-        type: "general",
-        priority: "high",
-      });
+    //   // Emit socket event to helpseeker
+    //   socketService.emitToUser(helpseekerId, 'helpseeker', 'taskAborted', {
+    //     taskId: task.id,
+    //     title: task.title,
+    //     abortedBy: 'helper',
+    //     message: 'Helper has cancelled the task',
+    //   });
+    // } else if (userType === "helpseeker" && helperId) {
+    //   // Helpseeker aborted - notify helper
+    //   await createNotification({
+    //     userId: helperId,
+    //     userType: 'helper',
+    //     taskId: task.id,
+    //     title: "Task Aborted",
+    //     message: `The helpseeker has cancelled the task "${task.title}"`,
+    //     type: "general",
+    //     priority: "high",
+    //   });
 
-      // Emit socket event to helper
-      socketService.emitToUser(helperId, 'helper', 'taskAborted', {
-        taskId: task.id,
-        title: task.title,
-        abortedBy: 'helpseeker',
-        message: 'Helpseeker has cancelled the task',
-      });
-    }
+    //   // Emit socket event to helper
+    //   socketService.emitToUser(helperId, 'helper', 'taskAborted', {
+    //     taskId: task.id,
+    //     title: task.title,
+    //     abortedBy: 'helpseeker',
+    //     message: 'Helpseeker has cancelled the task',
+    //   });
+    // }
+
+    const abortedBy = userType === "helper" ? "helper" : "helpseeker";
 
     res.status(200).json({
       success: true,
