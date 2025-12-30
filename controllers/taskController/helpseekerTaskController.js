@@ -1600,10 +1600,16 @@ const increaseReward = async (req, res) => {
       try {
         const { findAndAssociateNearestHelper } = require('../helperController/helperController');
         
-        // This will start fresh assignment from first available helper
-        await findAndAssociateNearestHelper(taskId);
+        // Get task location from main location or first step
+        const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
         
-        console.log(`✅ [REWARD INCREASE] Round-robin assignment triggered for task ${taskId}`);
+        if (taskLocation && taskLocation.lat && taskLocation.lng) {
+          // This will start fresh assignment from first available helper
+          await findAndAssociateNearestHelper(taskId, taskLocation);
+          console.log(`✅ [REWARD INCREASE] Round-robin assignment triggered for task ${taskId}`);
+        } else {
+          console.log(`⚠️ [REWARD INCREASE] Task ${taskId} has no location, skipping auto-assignment`);
+        }
       } catch (error) {
         console.error(`⚠️ [REWARD INCREASE] Failed to trigger round-robin assignment:`, error.message);
       }
