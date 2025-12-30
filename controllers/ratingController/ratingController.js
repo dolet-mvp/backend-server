@@ -127,16 +127,16 @@ const submitRating = async (req, res) => {
       }
     }
 
-    // Notify reviewee
-    await createNotification({
-      userId: revieweeId,
-      userType: revieweeType,
-      taskId: task.id,
-      title: "New Rating Received",
-      message: `You received a ${rating}-star rating for "${task.title}"`,
-      type: "rating_received",
-      priority: "medium",
-    });
+    // Notify reviewee - DISABLED: No notifications for ratings
+    // await createNotification({
+    //   userId: revieweeId,
+    //   userType: revieweeType,
+    //   taskId: task.id,
+    //   title: "New Rating Received",
+    //   message: `You received a ${rating}-star rating for "${task.title}"`,
+    //   type: "rating_received",
+    //   priority: "medium",
+    // });
 
     res.status(201).json({
       success: true,
