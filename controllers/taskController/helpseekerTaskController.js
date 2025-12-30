@@ -1524,25 +1524,47 @@ const increaseReward = async (req, res) => {
 
     console.log(`💰 [REWARD INCREASE] Task ${taskId} reward increased from ${oldBudget} to ${task.budget}`);
 
-    // ⚠️ IMPORTANT: Do NOT clear helper actions or delivery acknowledgments
-    // This ensures that previously rejected helpers won't see the task again
-    // Only the currently assigned helper should see the updated price
-    console.log(`📌 [REWARD INCREASE] Keeping existing helper actions intact (no reassignment on reward increase)`);
+    // ✅ CLEAR ALL HELPER ACTIONS - Give everyone a fresh chance with new price
+    // When price increases, all previous rejections/passes are forgotten
+    // Round-robin rotation will restart from the beginning
+    console.log(`🔄 [REWARD INCREASE] Clearing all helper actions - restarting round-robin rotation`);
     
-    // Get the currently assigned helper (if any) - we'll keep their assignment
-    const existingAssociatedHelpers = await redis.get(`task:${taskId}:associated_helpers`);
-    let currentHelperId = null;
+    // Clear helper actions from Redis
+    const actionsKey = `task:${taskId}:actions`;
+    await redis.del(actionsKey);
+    console.log(`✅ [REWARD INCREASE] Cleared helper actions from Redis`);
     
-    if (existingAssociatedHelpers) {
-      const helperIds = typeof existingAssociatedHelpers === 'string' 
-        ? JSON.parse(existingAssociatedHelpers) 
-        : existingAssociatedHelpers;
-      
-      if (Array.isArray(helperIds) && helperIds.length > 0) {
-        currentHelperId = helperIds[0];
-        console.log(`📌 [REWARD INCREASE] Task ${taskId} currently assigned to helper ${currentHelperId}`);
+    // Clear task-helper associations (task is unassigned now)
+    const taskAssociationsKey = `task:${taskId}:associated_helpers`;
+    await redis.del(taskAssociationsKey);
+    console.log(`✅ [REWARD INCREASE] Cleared task-helper associations`);
+    
+    // Clear delivery acknowledgments so helpers can receive the task again
+    const TaskDeliveryAcknowledgment = require("../../models/queueModel/queueModel");
+    await TaskDeliveryAcknowledgment.destroy({
+      where: { taskId: taskId }
+    });
+    console.log(`✅ [REWARD INCREASE] Cleared delivery acknowledgments`);
+    
+    // Clear all helper-task associations so task can be reassigned
+    // Get all helpers who were associated with this task
+    const helperTaskKeys = await redis.keys('helper:*:associated_tasks');
+    for (const key of helperTaskKeys) {
+      const associatedTasks = await redis.get(key);
+      if (associatedTasks) {
+        const tasks = typeof associatedTasks === 'string' ? JSON.parse(associatedTasks) : associatedTasks;
+        if (Array.isArray(tasks) && tasks.includes(taskId)) {
+          // Remove this task from helper's associated tasks
+          const updatedTasks = tasks.filter(id => id !== taskId);
+          if (updatedTasks.length > 0) {
+            await redis.set(key, JSON.stringify(updatedTasks));
+          } else {
+            await redis.del(key);
+          }
+        }
       }
     }
+    console.log(`✅ [REWARD INCREASE] Cleared helper-task associations for all helpers`);
 
     // Fetch helpseeker data for Redis
     const helpseeker = await Helpseeker.findByPk(helpseekerId);
@@ -1569,82 +1591,34 @@ const increaseReward = async (req, res) => {
     await redis.setex(`job:${task.id}`, 2592000, JSON.stringify(jobData));
     console.log(`✅ [REWARD INCREASE] Updated Redis job data with new budget`);
 
-    // If there's a currently assigned helper, deliver updated task to them
-    if (currentHelperId) {
-      console.log(`📲 [REWARD INCREASE] Delivering updated task to currently assigned helper ${currentHelperId}`);
-      
-      setImmediate(async () => {
-        try {
-          // ⚠️ Do NOT clear delivery acknowledgment - we want the helper to see price update
-          // but not have to re-acknowledge delivery
-          console.log(`📌 [REWARD INCREASE] Keeping delivery acknowledgment for current helper ${currentHelperId}`);
-          
-          const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
-          
-          // Deliver the updated task with new price to the current helper
-          const deliveryResult = await attemptTaskDelivery(task.id, currentHelperId, jobData, 1);
-          
-          if (deliveryResult.success) {
-            console.log(`✅ [REWARD INCREASE] Task with new price delivered to helper ${currentHelperId}`);
-          } else {
-            console.log(`⚠️ [REWARD INCREASE] Failed to deliver task to helper ${currentHelperId}`);
-          }
-          
-          // Also send specific reward increase notification via socket
-          const socketService = require('../../services/socketService');
-          const io = socketService.getIO();
-          const helperSocketEntry = Array.from(socketService.connectedUsers.entries()).find(
-            ([socketId, user]) => user.userId === currentHelperId && user.userType === 'helper'
-          );
-          
-          if (helperSocketEntry) {
-            const socketId = helperSocketEntry[0];
-            const socket = io.sockets.sockets.get(socketId);
-            if (socket) {
-              socket.emit('taskRewardIncreased', {
-                taskId: task.id,
-                oldBudget: parseFloat(oldBudget),
-                newBudget: parseFloat(task.budget),
-                increase: parseFloat(task.budget) - parseFloat(oldBudget),
-                title: task.title,
-              });
-              console.log(`✅ [REWARD INCREASE] Sent reward increase notification to helper ${currentHelperId}`);
-            }
-          }
-          
-          // Create database notification for the current helper
-          const Notification = require("../../models/notificationModel/notificationModel");
-          await Notification.create({
-            helperId: currentHelperId,
-            userType: 'helper',
-            taskId: task.id,
-            title: "Task Reward Increased!",
-            message: `The reward for "${task.title}" has been increased from $${oldBudget} to $${task.budget}!`,
-            type: "general",
-            priority: "high",
-          });
-          
-          console.log(`✅ [REWARD INCREASE] Created database notification for helper ${currentHelperId}`);
-        } catch (notifyError) {
-          console.error(`⚠️ [REWARD INCREASE] Failed to send notifications:`, notifyError.message);
-        }
-      });
-    } else {
-      console.log(`⚠️ [REWARD INCREASE] No currently assigned helper for task ${taskId}`);
-    }
+    // Trigger round-robin assignment from the beginning
+    // This will find and associate the first available helper who hasn't acted yet
+    // Since we cleared all actions, everyone gets a fresh chance
+    console.log(`🔄 [REWARD INCREASE] Triggering round-robin assignment from the beginning...`);
+    
+    setImmediate(async () => {
+      try {
+        const { findAndAssociateNearestHelper } = require('../helperController/helperController');
+        
+        // This will start fresh assignment from first available helper
+        await findAndAssociateNearestHelper(taskId);
+        
+        console.log(`✅ [REWARD INCREASE] Round-robin assignment triggered for task ${taskId}`);
+      } catch (error) {
+        console.error(`⚠️ [REWARD INCREASE] Failed to trigger round-robin assignment:`, error.message);
+      }
+    });
 
     res.status(200).json({
       success: true,
-      message: currentHelperId 
-        ? "Task reward increased successfully. Current helper has been notified with updated price."
-        : "Task reward increased successfully. Task will show updated price when assigned to a helper.",
+      message: "Task reward increased successfully. All helpers will get a fresh chance to see the updated price.",
       data: {
         task,
         oldBudget,
         newBudget: task.budget,
-        actionsCleared: false, // Actions NOT cleared - previous rejections still count
-        currentHelperId: currentHelperId,
-        reassignmentOnReject: true, // Reassignment only happens on reject/pass, not on reward increase
+        actionsCleared: true, // ✅ Actions cleared - all helpers get fresh chance
+        rotationRestarted: true, // ✅ Round-robin restarts from beginning
+        message: "Previous rejections cleared. Task will be offered to helpers again starting from the first one.",
       },
     });
   } catch (error) {
