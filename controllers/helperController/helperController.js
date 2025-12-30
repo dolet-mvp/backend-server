@@ -46,12 +46,6 @@ const findAndAssociateNearestHelper = async (taskId, taskLocation, excludeHelper
     
     console.log(`   🆕 ${helpersNotActed.length} helper(s) who haven't seen this task yet`);
     console.log(`   🔄 ${helpersAlreadyActed.length} helper(s) who already acted (for fallback)`);
-    // Separate helpers into two groups: haven't acted vs already acted
-    const helpersNotActed = validHelpers.filter(h => !actedHelperIds.includes(h.id));
-    const helpersAlreadyActed = validHelpers.filter(h => actedHelperIds.includes(h.id));
-    
-    console.log(`   🆕 ${helpersNotActed.length} helper(s) who haven't seen this task yet`);
-    console.log(`   🔄 ${helpersAlreadyActed.length} helper(s) who already acted (for fallback)`);
     
     // Prioritize helpers who haven't acted, fallback to those who have
     const helpersToCheck = helpersNotActed.length > 0 ? helpersNotActed : helpersAlreadyActed;
