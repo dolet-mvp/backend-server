@@ -43,16 +43,16 @@ const updateOnTheWay = async (req, res) => {
     task.status = "on_the_way";
     await task.save();
 
-    // Notify helpseeker
-    await createNotification({
-      userId: task.helpseekerId,
-      userType: 'helpseeker',
-      taskId: task.id,
-      title: "Helper is on the way",
-      message: `Your helper is on the way to "${task.title}"`,
-      type: "task_started",
-      priority: "high",
-    });
+    // Notify helpseeker - DISABLED: No notifications when helper marks on the way
+    // await createNotification({
+    //   userId: task.helpseekerId,
+    //   userType: 'helpseeker',
+    //   taskId: task.id,
+    //   title: "Helper is on the way",
+    //   message: `Your helper is on the way to "${task.title}"`,
+    //   type: "task_started",
+    //   priority: "high",
+    // });
 
     res.status(200).json({
       success: true,
@@ -94,16 +94,16 @@ const markArrived = async (req, res) => {
     task.status = "arrived";
     await task.save();
 
-    // Notify helpseeker
-    await createNotification({
-      userId: task.helpseekerId,
-      userType: 'helpseeker',
-      taskId: task.id,
-      title: "Helper Arrived",
-      message: `Your helper has arrived for "${task.title}"`,
-      type: "task_started",
-      priority: "high",
-    });
+    // Notify helpseeker - DISABLED: No notifications when helper marks arrived
+    // await createNotification({
+    //   userId: task.helpseekerId,
+    //   userType: 'helpseeker',
+    //   taskId: task.id,
+    //   title: "Helper Arrived",
+    //   message: `Your helper has arrived for "${task.title}"`,
+    //   type: "task_started",
+    //   priority: "high",
+    // });
 
     res.status(200).json({
       success: true,
@@ -423,16 +423,16 @@ const completeWork = async (req, res) => {
       // Continue execution even if helper update fails
     }
 
-    // Notify helpseeker
-    await createNotification({
-      userId: task.helpseekerId,
-      userType: 'helpseeker',
-      taskId: task.id,
-      title: "Task Completed",
-      message: `Helper has completed "${task.title}". Please review and make payment.`,
-      type: "task_completed",
-      priority: "high",
-    });
+    // Notify helpseeker - DISABLED: No notifications when helper completes task
+    // await createNotification({
+    //   userId: task.helpseekerId,
+    //   userType: 'helpseeker',
+    //   taskId: task.id,
+    //   title: "Task Completed",
+    //   message: `Helper has completed "${task.title}". Please review and make payment.`,
+    //   type: "task_completed",
+    //   priority: "high",
+    // });
 
     res.status(200).json({
       success: true,

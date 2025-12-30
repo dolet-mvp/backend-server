@@ -837,20 +837,21 @@ const acceptTask = async (req, res) => {
     ]).catch(err => console.error('⚠️ Failed to create notifications:', err));
 
     // Send push notifications to both helper and helpseeker
+    // DISABLED: No push notifications to helpseeker when helper accepts task
     Promise.all([
-      sendToUser(
-        task.helpseekerId,
-        'helpseeker',
-        {
-          title: "Task Accepted by Helper",
-          body: `${helper.fullName} has accepted your task "${task.title}". OTP: ${otp}`,
-        },
-        {
-          type: "task_assigned",
-          taskId: task.id.toString(),
-          otp: otp,
-        }
-      ).catch(err => console.error('⚠️ Failed to send push notification to helpseeker:', err)),
+      // sendToUser(
+      //   task.helpseekerId,
+      //   'helpseeker',
+      //   {
+      //     title: "Task Accepted by Helper",
+      //     body: `${helper.fullName} has accepted your task "${task.title}". OTP: ${otp}`,
+      //   },
+      //   {
+      //     type: "task_assigned",
+      //     taskId: task.id.toString(),
+      //     otp: otp,
+      //   }
+      // ).catch(err => console.error('⚠️ Failed to send push notification to helpseeker:', err)),
       sendToUser(
         helperId,
         'helper',
