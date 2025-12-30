@@ -166,40 +166,43 @@ const sendToUser = async (userId, userType, notification, data = {}) => {
       return { success: true, message: "No devices to send to" };
     }
 
-    // Send to all devices
-    const results = await Promise.allSettled(
-      deviceTokens.map((device) =>
-        sendToDevice(device.token, notification, data)
-      )
-    );
+    // FIX DUPLICATE NOTIFICATIONS: Send only to the most recently used device
+    // This prevents sending the same notification 3-8 times when user has multiple devices
+    const mostRecentDevice = deviceTokens.reduce((latest, current) => {
+      const latestTime = latest.lastUsed ? new Date(latest.lastUsed).getTime() : 0;
+      const currentTime = current.lastUsed ? new Date(current.lastUsed).getTime() : 0;
+      return currentTime > latestTime ? current : latest;
+    }, deviceTokens[0]);
 
-    const successCount = results.filter(
-      (r) => r.status === "fulfilled" && r.value.success
-    ).length;
-    const failCount = results.length - successCount;
+    console.log(`📱 [PUSH] Sending to most recent device only (of ${deviceTokens.length} available)`);
 
-    console.log(
-      `📊 Sent push notifications to user ${userId}: ${successCount} success, ${failCount} failed`
-    );
+    // Send to only the most recent device
+    const result = await sendToDevice(mostRecentDevice.token, notification, data);
 
-    // Update last used timestamp for successful sends
-    await DeviceToken.update(
-      { lastUsed: new Date() },
-      {
-        where: {
-          token: deviceTokens
-            .filter((_, index) => results[index].status === "fulfilled")
-            .map((d) => d.token),
-        },
-      }
-    );
+    if (result.success) {
+      console.log(`✅ Sent push notification to user ${userId}: 1 success, 0 failed`);
+      
+      // Update last used timestamp
+      await DeviceToken.update(
+        { lastUsed: new Date() },
+        { where: { token: mostRecentDevice.token } }
+      );
 
-    return {
-      success: true,
-      totalSent: deviceTokens.length,
-      successCount,
-      failCount,
-    };
+      return {
+        success: true,
+        totalSent: 1,
+        successCount: 1,
+        failCount: 0,
+      };
+    } else {
+      console.log(`❌ Failed to send push notification to user ${userId}`);
+      return {
+        success: false,
+        totalSent: 1,
+        successCount: 0,
+        failCount: 1,
+      };
+    }
   } catch (error) {
     console.error("Error sending push notification to user:", error);
     return { success: false, error: error.message };
