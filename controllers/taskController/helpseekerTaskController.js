@@ -1524,16 +1524,10 @@ const increaseReward = async (req, res) => {
 
     console.log(`💰 [REWARD INCREASE] Task ${taskId} reward increased from ${oldBudget} to ${task.budget}`);
 
-    // Clear all helper actions for this task to give everyone a fresh chance with the new price
-    console.log(`🧹 [REWARD INCREASE] Clearing all helper actions for task ${taskId}`);
-    await redis.del(`task:${taskId}:actions`);
-    
-    // Clear ALL delivery acknowledgments so helpers can receive the task again after rotation
-    console.log(`🧹 [REWARD INCREASE] Clearing all delivery acknowledgments for task ${taskId}`);
-    const TaskDeliveryAcknowledgment = require('../../models/taskModel/taskDeliveryAcknowledgmentModel');
-    await TaskDeliveryAcknowledgment.destroy({
-      where: { task_id: taskId }
-    });
+    // ⚠️ IMPORTANT: Do NOT clear helper actions or delivery acknowledgments
+    // This ensures that previously rejected helpers won't see the task again
+    // Only the currently assigned helper should see the updated price
+    console.log(`📌 [REWARD INCREASE] Keeping existing helper actions intact (no reassignment on reward increase)`);
     
     // Get the currently assigned helper (if any) - we'll keep their assignment
     const existingAssociatedHelpers = await redis.get(`task:${taskId}:associated_helpers`);
@@ -1581,15 +1575,9 @@ const increaseReward = async (req, res) => {
       
       setImmediate(async () => {
         try {
-          // Clear the existing delivery acknowledgment so the task can be re-delivered with new price
-          const TaskDeliveryAcknowledgment = require('../../models/taskModel/taskDeliveryAcknowledgmentModel');
-          await TaskDeliveryAcknowledgment.destroy({
-            where: { 
-              task_id: taskId,
-              helper_id: currentHelperId
-            }
-          });
-          console.log(`🧹 [REWARD INCREASE] Cleared delivery acknowledgment for current helper ${currentHelperId}`);
+          // ⚠️ Do NOT clear delivery acknowledgment - we want the helper to see price update
+          // but not have to re-acknowledge delivery
+          console.log(`📌 [REWARD INCREASE] Keeping delivery acknowledgment for current helper ${currentHelperId}`);
           
           const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
           
@@ -1648,15 +1636,15 @@ const increaseReward = async (req, res) => {
     res.status(200).json({
       success: true,
       message: currentHelperId 
-        ? "Task reward increased successfully. Current helper has been notified."
-        : "Task reward increased successfully. Helper actions cleared for fresh rotation.",
+        ? "Task reward increased successfully. Current helper has been notified with updated price."
+        : "Task reward increased successfully. Task will show updated price when assigned to a helper.",
       data: {
         task,
         oldBudget,
         newBudget: task.budget,
-        actionsCleared: true,
+        actionsCleared: false, // Actions NOT cleared - previous rejections still count
         currentHelperId: currentHelperId,
-        reassignmentOnReject: true,
+        reassignmentOnReject: true, // Reassignment only happens on reject/pass, not on reward increase
       },
     });
   } catch (error) {
