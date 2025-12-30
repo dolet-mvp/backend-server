@@ -1604,37 +1604,54 @@ const increaseReward = async (req, res) => {
         const taskLocation = task.location || (task.steps && task.steps[0] ? task.steps[0].location : null);
         
         if (taskLocation && taskLocation.lat && taskLocation.lng) {
-          // This will start fresh assignment from first available helper
-          await findAndAssociateNearestHelper(taskId, taskLocation);
-          console.log(`✅ [REWARD INCREASE] Round-robin assignment triggered for task ${taskId}`);
+          // This will find the nearest available helper (returns helperId only)
+          const nearestHelperId = await findAndAssociateNearestHelper(taskId, taskLocation);
           
-          // Now deliver the task to the newly associated helper
-          const associatedHelpersData = await redis.get(`task:${taskId}:associated_helpers`);
-          if (associatedHelpersData) {
-            const helperIds = typeof associatedHelpersData === 'string' 
-              ? JSON.parse(associatedHelpersData) 
-              : associatedHelpersData;
+          if (nearestHelperId) {
+            console.log(`✅ [REWARD INCREASE] Found nearest helper: ${nearestHelperId}`);
             
-            if (Array.isArray(helperIds) && helperIds.length > 0) {
-              const newHelperId = helperIds[0];
-              console.log(`📲 [REWARD INCREASE] Delivering updated task to newly assigned helper ${newHelperId}...`);
-              
-              // Import and use the task delivery service
-              const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
-              
-              // Deliver the task with updated price
-              const deliveryResult = await attemptTaskDelivery(taskId, newHelperId, jobData, 1);
-              
-              if (deliveryResult.success) {
-                console.log(`✅ [REWARD INCREASE] Task with increased price delivered to helper ${newHelperId}`);
-              } else {
-                console.log(`⚠️ [REWARD INCREASE] Failed to deliver task to helper ${newHelperId}: ${deliveryResult.error}`);
+            // Now manually do the association (same as publish flow)
+            // 1. Write to task:X:associated_helpers
+            await redis.setex(
+              `task:${taskId}:associated_helpers`,
+              2592000,
+              JSON.stringify([nearestHelperId])
+            );
+            
+            // 2. Write to helper:X:associated_tasks
+            const helperTasksKey = `helper:${nearestHelperId}:associated_tasks`;
+            const existingTasks = await redis.get(helperTasksKey);
+            let taskIds = existingTasks 
+              ? (typeof existingTasks === 'string' ? JSON.parse(existingTasks) : existingTasks)
+              : [];
+            
+            if (!taskIds.includes(taskId)) {
+              taskIds.push(taskId);
+              await redis.setex(helperTasksKey, 43200, JSON.stringify(taskIds));
+            }
+            
+            console.log(`✅ [REWARD INCREASE] Task ${taskId} associated with helper ${nearestHelperId}`);
+            
+            // 3. Now deliver the task with updated price
+            const { attemptTaskDelivery } = require('../../services/taskDeliveryService');
+            
+            console.log(`📲 [REWARD INCREASE] Delivering updated task to helper ${nearestHelperId}...`);
+            
+            const deliveryResult = await attemptTaskDelivery(taskId, nearestHelperId, jobData, 1);
+            
+            if (deliveryResult.success) {
+              console.log(`✅ [REWARD INCREASE] Task with increased price delivered to helper ${nearestHelperId}`);
+              if (deliveryResult.deliveryResults.socket) {
+                console.log(`✅ [REWARD INCREASE] Delivered via socket immediately`);
+              }
+              if (deliveryResult.deliveryResults.push) {
+                console.log(`✅ [REWARD INCREASE] Push notification sent`);
               }
             } else {
-              console.log(`⚠️ [REWARD INCREASE] No helper associated after round-robin assignment`);
+              console.log(`⚠️ [REWARD INCREASE] Failed to deliver task: ${deliveryResult.error}`);
             }
           } else {
-            console.log(`⚠️ [REWARD INCREASE] No association data found after round-robin assignment`);
+            console.log(`⚠️ [REWARD INCREASE] No available helper found for task ${taskId}`);
           }
         } else {
           console.log(`⚠️ [REWARD INCREASE] Task ${taskId} has no location, skipping auto-assignment`);
