@@ -34,19 +34,36 @@ const findAndAssociateNearestHelper = async (taskId, taskLocation, excludeHelper
     const helperPromises = onlineHelperKeys.map(key => redis.get(key));
     const helpersData = await Promise.all(helperPromises);
     
+    // FIX: Prioritize helpers who haven't seen the task yet
     const validHelpers = helpersData
       .filter(data => data !== null)
       .map(data => typeof data === 'string' ? JSON.parse(data) : data)
-      .filter(helper => helper.id !== excludeHelperId && !actedHelperIds.includes(helper.id)); // Exclude helpers who acted
+      .filter(helper => helper.id !== excludeHelperId); // Only exclude the current rejecting helper
     
-    if (validHelpers.length === 0) {
+    // Separate helpers into two groups: haven't acted vs already acted
+    const helpersNotActed = validHelpers.filter(h => !actedHelperIds.includes(h.id));
+    const helpersAlreadyActed = validHelpers.filter(h => actedHelperIds.includes(h.id));
+    
+    console.log(`   🆕 ${helpersNotActed.length} helper(s) who haven't seen this task yet`);
+    console.log(`   🔄 ${helpersAlreadyActed.length} helper(s) who already acted (for fallback)`);
+    // Separate helpers into two groups: haven't acted vs already acted
+    const helpersNotActed = validHelpers.filter(h => !actedHelperIds.includes(h.id));
+    const helpersAlreadyActed = validHelpers.filter(h => actedHelperIds.includes(h.id));
+    
+    console.log(`   🆕 ${helpersNotActed.length} helper(s) who haven't seen this task yet`);
+    console.log(`   🔄 ${helpersAlreadyActed.length} helper(s) who already acted (for fallback)`);
+    
+    // Prioritize helpers who haven't acted, fallback to those who have
+    const helpersToCheck = helpersNotActed.length > 0 ? helpersNotActed : helpersAlreadyActed;
+    
+    if (helpersToCheck.length === 0) {
       console.log('   ⚠️ No other online helpers available');
       return null;
     }
     
     // CHECK: Filter out helpers who already have associated tasks (busy)
     const availableHelpers = [];
-    for (const helper of validHelpers) {
+    for (const helper of helpersToCheck) {
       const helperTasksKey = `helper:${helper.id}:associated_tasks`;
       const existingTasksData = await redis.get(helperTasksKey);
       
