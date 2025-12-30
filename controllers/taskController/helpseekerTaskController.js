@@ -229,6 +229,10 @@ const   publishTask = async (req, res) => {
     await transaction.commit();
     transaction = null;
 
+    // Reload task from database to ensure all JSON fields are properly hydrated
+    await task.reload();
+    console.log(`⏱️ [PUBLISH] Task reloaded from database`);
+
     // Fetch helpseeker data for Redis
     const helpseeker = await Helpseeker.findByPk(helpseekerId);
 
@@ -279,6 +283,12 @@ const   publishTask = async (req, res) => {
         hasStepLocation: !!(task.steps && task.steps[0] && task.steps[0].location),
         willBroadcast: !!hasValidLocation,
         locationSource: task.location ? 'main' : 'step',
+        taskLocationData: taskLocationForBroadcast ? {
+          lat: taskLocationForBroadcast.lat,
+          lng: taskLocationForBroadcast.lng,
+          address: taskLocationForBroadcast.address
+        } : 'NO LOCATION',
+        rawStepsData: task.steps && task.steps[0] ? JSON.stringify(task.steps[0]) : 'NO STEPS'
       });
 
       // Associate newly published task with online helpers FIRST, then broadcast
