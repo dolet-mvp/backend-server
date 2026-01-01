@@ -91,14 +91,17 @@ const decryptHelperData = (helper) => {
   
   // Decrypt document fields - return null if decryption fails
   try {
-    if (helperData.aadharCardDocument) {
-      helperData.aadharCardDocument = decrypt(helperData.aadharCardDocument);
+    if (helperData.aadharCard) {
+      helperData.aadharCard = decrypt(helperData.aadharCard);
     }
-    if (helperData.addressProofDocument) {
-      helperData.addressProofDocument = decrypt(helperData.addressProofDocument);
+    if (helperData.selfie) {
+      helperData.selfie = decrypt(helperData.selfie);
     }
-    if (helperData.drivingLicenseDocument) {
-      helperData.drivingLicenseDocument = decrypt(helperData.drivingLicenseDocument);
+    if (helperData.panCard) {
+      helperData.panCard = decrypt(helperData.panCard);
+    }
+    if (helperData.addressProof) {
+      helperData.addressProof = decrypt(helperData.addressProof);
     }
   } catch (error) {
     // Silently handle decryption errors for individual fields

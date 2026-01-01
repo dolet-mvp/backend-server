@@ -109,30 +109,38 @@ const handleHelperUploadDocument = async (req, res) => {
 
     const documents = req.fileUrls || {};
 
-    if (!documents.aadharCard || !documents.addressProof) {
-      return res.status(400).json({
-        success: false,
-        message: "Aadhar card and address proof documents are required",
-      });
-    }
-
-    // Encrypt document URLs before storing
+    // All documents are now optional
+    // Encrypt document URLs before storing (only if provided)
     const encryptedDocs = encryptDocuments({
-      aadharCard: documents.aadharCard,
-      addressProof: documents.addressProof,
-      drivingLicense: documents.drivingLicense
+      aadharCard: documents.aadharCard || null,
+      selfie: documents.selfie || null,
+      panCard: documents.panCard || null,
+      addressProof: documents.addressProof || null
     });
 
-    await helper.update({
+    const updateData = {
       accountNumber,
       ifscCode,
       accountHolderName,
-      aadharCardDocument: encryptedDocs.aadharCard,
-      addressProofDocument: encryptedDocs.addressProof,
-      drivingLicenseDocument: encryptedDocs.drivingLicense,
       verificationStatus: "submitted",
       isApproved: false,
-    });
+    };
+
+    // Only update document fields if they are provided
+    if (encryptedDocs.aadharCard) {
+      updateData.aadharCard = encryptedDocs.aadharCard;
+    }
+    if (encryptedDocs.selfie) {
+      updateData.selfie = encryptedDocs.selfie;
+    }
+    if (encryptedDocs.panCard) {
+      updateData.panCard = encryptedDocs.panCard;
+    }
+    if (encryptedDocs.addressProof) {
+      updateData.addressProof = encryptedDocs.addressProof;
+    }
+
+    await helper.update(updateData);
 
     res.status(200).json({
       success: true,

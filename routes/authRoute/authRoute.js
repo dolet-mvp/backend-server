@@ -32,8 +32,9 @@ router.post(
   checkForAuthenticationCookie(),
   supabaseUpload.fields([
     { name: "aadharCard", maxCount: 1 },
-    { name: "addressProof", maxCount: 1 },
-    { name: "drivingLicense", maxCount: 1 }
+    { name: "selfie", maxCount: 1 },
+    { name: "panCard", maxCount: 1 },
+    { name: "addressProof", maxCount: 1 }
   ]),
   handleHelperUploadDocument
 );
