@@ -852,6 +852,228 @@ const getHelpseekerAnalytics = async (req, res) => {
   }
 };
 
+// Get all tasks for admin panel (Jobs Posted)
+const getAllTasksForAdmin = async (req, res) => {
+  try {
+    const { status, priority, category, page = 1, limit = 50 } = req.query;
+    const offset = (page - 1) * limit;
+
+    // Build where clause for filters
+    const whereClause = {};
+    if (status && status !== 'all') {
+      whereClause.status = status;
+    }
+    if (priority && priority !== 'all') {
+      whereClause.priority = priority;
+    }
+    if (category && category !== 'all') {
+      whereClause.category = category;
+    }
+
+    // Fetch tasks with related data
+    const { count, rows: tasks } = await Task.findAndCountAll({
+      where: whereClause,
+      attributes: [
+        'id',
+        'title',
+        'description',
+        'steps',
+        'budget',
+        'estimatedDuration',
+        'dueDate',
+        'status',
+        'priority',
+        'category',
+        'location',
+        'assignedHelperId',
+        'helpseekerId',
+        'createdAt',
+        'updatedAt'
+      ],
+      include: [
+        {
+          model: Helper,
+          as: 'assignedHelper',
+          attributes: ['id', 'fullName', 'phone'],
+          required: false
+        },
+        {
+          model: Helpseeker,
+          as: 'creator',
+          attributes: ['id', 'fullName', 'phone'],
+          required: false
+        }
+      ],
+      order: [['createdAt', 'DESC']],
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+
+    // Calculate stats
+    const allTasks = await Task.findAll({ attributes: ['status'] });
+    const stats = {
+      total: allTasks.length,
+      published: allTasks.filter(t => t.status === 'published').length,
+      inProgress: allTasks.filter(t => ['assigned', 'in_progress', 'on_the_way', 'arrived'].includes(t.status)).length,
+      completed: allTasks.filter(t => t.status === 'completed').length,
+      cancelled: allTasks.filter(t => t.status === 'cancelled').length
+    };
+
+    res.status(200).json({
+      success: true,
+      tasks,
+      stats,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get all tasks for admin error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch tasks',
+      error: error.message,
+    });
+  }
+};
+
+// Delete a task (Admin only)
+const deleteTaskByAdmin = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+
+    const task = await Task.findByPk(taskId);
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found',
+      });
+    }
+
+    // Check if task can be deleted (not in progress)
+    const nonDeletableStatuses = ['in_progress', 'on_the_way', 'arrived'];
+    if (nonDeletableStatuses.includes(task.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete task that is ${task.status.replace(/_/g, ' ')}`,
+      });
+    }
+
+    await task.destroy();
+
+    res.status(200).json({
+      success: true,
+      message: 'Task deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete task error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete task',
+      error: error.message,
+    });
+  }
+};
+
+
+// Get active tasks for admin panel (Active Tasks Dashboard)
+const getActiveTasksForAdmin = async (req, res) => {
+  try {
+    const { status, page = 1, limit = 50 } = req.query;
+    const offset = (page - 1) * limit;
+
+    // Active statuses
+    const activeStatuses = ['in_queue', 'published', 'assigned', 'on_the_way', 'arrived', 'in_progress'];
+
+    // Build where clause
+    const whereClause = {};
+    if (status && status !== 'all' && activeStatuses.includes(status)) {
+      whereClause.status = status;
+    } else {
+      whereClause.status = activeStatuses;
+    }
+
+    // Fetch active tasks with related data
+    const { count, rows: tasks } = await Task.findAndCountAll({
+      where: whereClause,
+      attributes: [
+        'id',
+        'title',
+        'description',
+        'steps',
+        'budget',
+        'estimatedDuration',
+        'dueDate',
+        'status',
+        'priority',
+        'category',
+        'location',
+        'assignedHelperId',
+        'helpseekerId',
+        'acceptedAt',
+        'startedAt',
+        'createdAt',
+        'updatedAt'
+      ],
+      include: [
+        {
+          model: Helper,
+          as: 'assignedHelper',
+          attributes: ['id', 'fullName', 'phone'],
+          required: false
+        },
+        {
+          model: Helpseeker,
+          as: 'creator',
+          attributes: ['id', 'fullName', 'phone'],
+          required: false
+        }
+      ],
+      order: [['updatedAt', 'DESC']],
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+
+    // Calculate stats for active tasks
+    const allActiveTasks = await Task.findAll({ 
+      where: { status: activeStatuses },
+      attributes: ['status'] 
+    });
+    
+    const stats = {
+      total: allActiveTasks.length,
+      inQueue: allActiveTasks.filter(t => t.status === 'in_queue').length,
+      published: allActiveTasks.filter(t => t.status === 'published').length,
+      assigned: allActiveTasks.filter(t => t.status === 'assigned').length,
+      onTheWay: allActiveTasks.filter(t => t.status === 'on_the_way').length,
+      arrived: allActiveTasks.filter(t => t.status === 'arrived').length,
+      inProgress: allActiveTasks.filter(t => t.status === 'in_progress').length
+    };
+
+    res.status(200).json({
+      success: true,
+      tasks,
+      stats,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get active tasks for admin error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch active tasks',
+      error: error.message,
+    });
+  }
+};
+
 
 module.exports = {
   handleAdminLogin,
@@ -872,4 +1094,7 @@ module.exports = {
   disableTwoFactor,
   getHelperAnalytics,
   getHelpseekerAnalytics,
+  getAllTasksForAdmin,
+  deleteTaskByAdmin,
+  getActiveTasksForAdmin,
 };

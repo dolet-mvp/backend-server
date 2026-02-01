@@ -10,10 +10,37 @@ const {
   enableTwoFactor,
   disableTwoFactor,
   getHelperAnalytics,
-  getHelpseekerAnalytics
+  getHelpseekerAnalytics,
+  getAllTasksForAdmin,
+  deleteTaskByAdmin,
+  getActiveTasksForAdmin
 } = require("../../controllers/authController/adminAuthController");
 const { getAllPendingDeliveries } = require("../../controllers/taskController/taskDeliveryController");
 const { checkUnacceptedTasks } = require("../../services/taskSchedulerService");
+
+// Get all tasks (Jobs Posted)
+router.get(
+  "/tasks",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  getAllTasksForAdmin
+);
+
+// Get active tasks (Active Tasks Dashboard)
+router.get(
+  "/tasks/active",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  getActiveTasksForAdmin
+);
+
+// Delete a task
+router.delete(
+  "/tasks/:taskId",
+  checkForAuthenticationCookie(),
+  checkUserType("admin"),
+  deleteTaskByAdmin
+);
 
 // Update admin profile
 router.put(
