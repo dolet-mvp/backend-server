@@ -286,12 +286,45 @@ const getMyDevices = async (req, res) => {
   }
 };
 
+// Delete all notifications for user
+const deleteAllNotifications = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userType = req.user.userType;
+
+    const whereClause = { userType };
+    if (userType === 'helper') {
+      whereClause.helperId = userId;
+    } else if (userType === 'helpseeker') {
+      whereClause.helpseekerId = userId;
+    }
+
+    const deletedCount = await Notification.destroy({
+      where: whereClause,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `${deletedCount} notification(s) deleted successfully`,
+      deletedCount,
+    });
+  } catch (error) {
+    console.error("Delete all notifications error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete notifications",
+      error: error.message,
+    });
+  }
+};
+
 
 
 
 module.exports = {
   getNotifications,
   deleteNotification,
+  deleteAllNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   registerDevice,

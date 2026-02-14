@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getNotifications,
   deleteNotification,
+  deleteAllNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   registerDevice,
@@ -33,6 +34,14 @@ router.patch(
   checkForAuthenticationCookie(),
   checkUserType(["helper", "helpseeker"]),
   markAllNotificationsAsRead
+);
+
+// Delete all notifications
+router.delete(
+  "/delete-all",
+  checkForAuthenticationCookie(),
+  checkUserType(["helper", "helpseeker"]),
+  deleteAllNotifications
 );
 
 // Delete notification

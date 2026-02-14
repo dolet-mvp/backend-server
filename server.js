@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("dotenv").config({ path: ".env.local" });
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
@@ -85,6 +85,7 @@ const geminiRoutes = require("./routes/aiRoute/gemniRoute");
 const reportRoutes = require("./routes/reportRoute/reportRoute");
 const blockRoutes = require("./routes/blockRoute/blockRoute");
 const adminRoutes = require("./routes/adminRoute/adminRoute");
+const locationRoutes = require("./routes/locationRoute/locationRoute");
 const optionalAuthentication = require("./middleware/authMiddleware").optionalAuthentication;
 
 
@@ -134,6 +135,12 @@ app.use(
 app.use(
   "/api/helpers",
   helperRoutes
+);
+
+// Location routes
+app.use(
+  "/api/location",
+  locationRoutes
 );
 
 // Notification routes
