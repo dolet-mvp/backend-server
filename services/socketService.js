@@ -1,6 +1,7 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const cookie = require("cookie");
+const { sendToUser } = require("./pushNotificationService");
 
 let io;
 const connectedUsers = new Map(); // Map to track userId -> socketId
@@ -484,9 +485,41 @@ const initSocketServer = (server) => {
         console.log(`✅ [SOCKET SERVER] Message sent to others in room: ${roomName}`);
         console.log(`✅ [SOCKET SERVER] Confirmation sent back to sender with tempId: ${tempId}`);
 
-        // Send push notification to the recipient (only if not in chat) - DISABLED
-        // const recipientId = userType === 'helper' ? task.helpseekerId : task.assignedHelperId;
-        // const recipientType = userType === 'helper' ? 'helpseeker' : 'helper';
+        // Send push notification to the recipient (only if not in chat room)
+        const recipientId = userType === 'helper' ? task.helpseekerId : task.assignedHelperId;
+        const recipientType = userType === 'helper' ? 'helpseeker' : 'helper';
+
+        if (recipientId) {
+          // Check if recipient is currently in the chat room
+          let recipientInRoom = false;
+          if (socketsInRoom) {
+            for (const socketId of socketsInRoom) {
+              const user = connectedUsers.get(socketId);
+              if (user && user.userId === recipientId) {
+                recipientInRoom = true;
+                break;
+              }
+            }
+          }
+
+          // Only send push if recipient is NOT in the chat room
+          if (!recipientInRoom) {
+            const senderName = messageToSend.sender?.fullName || (userType === 'helper' ? 'Helper' : 'Helpseeker');
+            const messagePreview = message.length > 50 ? message.substring(0, 50) + '...' : message;
+            
+            console.log(`📲 [SOCKET SERVER] Recipient ${recipientId} not in chat room, sending push notification`);
+            
+            sendToUser(recipientId, recipientType, {
+              title: `New message from ${senderName}`,
+              body: messagePreview,
+            }, {
+              type: 'chat_message',
+              taskId: taskId.toString(),
+            }).catch(err => console.warn('⚠️ [SOCKET SERVER] Chat push notification failed:', err.message));
+          } else {
+            console.log(`ℹ️ [SOCKET SERVER] Recipient ${recipientId} is in chat room, skipping push notification`);
+          }
+        }
       } catch (error) {
         console.error("❌ [SOCKET SERVER] Error sending message:", error);
         socket.emit("messageError", { error: error.message });
