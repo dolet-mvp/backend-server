@@ -515,6 +515,8 @@ const initSocketServer = (server) => {
             }, {
               type: 'chat_message',
               taskId: taskId.toString(),
+              senderType: userType,
+              userType: recipientType,
             }).catch(err => console.warn('⚠️ [SOCKET SERVER] Chat push notification failed:', err.message));
           } else {
             console.log(`ℹ️ [SOCKET SERVER] Recipient ${recipientId} is in chat room, skipping push notification`);
